@@ -1,6 +1,6 @@
 [TOC]
 
-# 编译器特性 && 选项 && 宏
+# 编译器特性 && 选项
 
 ## __va_arg_pack 用于处理可变参数函数
 
@@ -260,4 +260,40 @@ fprintf (FILE *__restrict __stream, const char *__restrict __fmt, ...)
 
 ```shell
 echo $KCONFIG_SEED # 显示环境变量的值
+```
+
+# 宏
+
+## dummy 虚拟变量
+- `dummy` 是一个虚拟参数，用于确保宏展开时参数列表的长度一致。在 __count_args 宏中，dummy 被用作第一个参数，以确保即使没有传递任何参数，参数列表的长度也至少为 1。
+```c
+/*
+ * 计算可变参数宏的参数数。目前只需要
+ * 它用于 1、2 或 3 个参数。
+ */
+#define __arg6(a1, a2, a3, a4, a5, a6, ...) a6
+#define __count_args(...) __arg6(dummy, ##__VA_ARGS__, 4, 3, 2, 1, 0)
+```
+
+## `##__VA_ARGS__` 用于处理可变参数宏
+- `##__VA_ARGS__` 是一个预处理器技巧，用于处理可变参数宏。__VA_ARGS__ 是一个特殊的宏参数，表示传递给宏的所有可变参数。## 是预处理器的连接运算符，用于将两个标识符连接在一起。
+```c
+/*
+ * 计算可变参数宏的参数数。目前只需要
+ * 它用于 1、2 或 3 个参数。
+ */
+#define __arg6(a1, a2, a3, a4, a5, a6, ...) a6
+#define __count_args(...) __arg6(dummy, ##__VA_ARGS__, 4, 3, 2, 1, 0)
+```
+
+## _Static_assert 编译时断言
+```c
+_Static_assert(EVT_COUNT < 256, "Can only support 256 event types with 8 bits");
+```
+
+## likely && unlikely 优化分支预测
+- __builtin_expect 是 GCC 提供的一个内建函数，用于向编译器提供分支预测信息。!!(x) 将 x 转换为布尔值，1 表示这个条件很可能为真。通过使用这个宏，开发者可以提示编译器优化代码路径，使得这个条件为真的情况执行得更快。
+```c
+#define likely(x)       __builtin_expect(!!(x), 1)
+#define unlikely(x)     __builtin_expect(!!(x), 0)
 ```

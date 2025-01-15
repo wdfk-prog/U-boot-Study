@@ -452,16 +452,48 @@ g Makefile
 
 - 查看[GNU C.md](./子目录/GNU_C.md)
 
+# objdump 工具
+
+## 反汇编 -d
+
+```shell
+objdump -d start.o
+```
+- 更多的详细信息，可以使用 -S 选项，它会将源代码和反汇编代码一起显示
+- 问题:
+  1.  `objdump: can't disassemble for architecture UNKNOWN!`
+    - 出现这个错误可能是因为 objdump 工具无法识别目标文件的架构。你可以尝试显式指定架构来解决这个问题。
+    ````shell
+    objdump -d -m arm start.o
+    ````
+
+    - 使用`file`命令查看文件类型
+      ```shell
+      $file start.o
+      arch/arm/cpu/armv7m/start.o: ELF 32-bit LSB relocatable, ARM, EABI5 version 1 (SYSV), with debug_info, not stripped
+      ```
+    - 使用`objdump -i`查看支持的架构
+    - 根据你的架构 armv7m,使用`arm-none-eabi-objdump `
+
+## 查看段信息 -h
+
+## 显示段内容 -s
+
+## 反汇编指定的段 -j
+
 # Bison && Flex
 
 - - 查看[son &amp;&amp; Flex.md](./子目录/Bison_Flex.md)
 
 # map分析
-- [u-boot.map](./学习芯片/ART-PI/u-boot.map)
+- [u-boot.map分析](./子目录/u-boot.map.md)
 
+# 流程分析
 
-# U -BOOT
+- [u-boot流程分析](./子目录/u-boot流程分析.md)
 
+# U -BOOT 配置
+## 设置编译引导加载程序
 ### VPL（Very Early Program Loader）
 
 * **功能** ：VPL 是 U-Boot 的非常早期引导加载程序，通常用于在极其受限的环境中进行最基本的硬件初始化。
@@ -479,3 +511,39 @@ g Makefile
 * **功能** ：TPL 是 U-Boot 的第三阶段引导加载程序，通常用于在资源受限的环境中进一步初始化硬件资源。
 * **位置** ：TPL 通常位于存储设备的固定位置，类似于 SPL。
 * **作用** ：TPL 的主要任务是加载并执行 SPL，以便进一步初始化系统并准备加载 U-Boot 主引导加载程序。
+
+## 设置系统栈指针地址与长度
+```c
+CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
+CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x24040000
+CONFIG_ENV_SIZE=0x2000
+
+#define CONFIG_SYS_MALLOC_F 1
+#define CONFIG_SYS_MALLOC_F_LEN 0x2000
+#define CONFIG_CUSTOM_SYS_INIT_SP_ADDR 0x24040000
+```
+
+## 事件功能 CONFIG_EVENT
+### EVENT_DEBUG
+### EVENT_DYNAMIC
+
+## printf功能
+```c
+CONFIG_SYS_PBSIZE=282
+
+#define CONFIG_PRINTF 1
+#define CONFIG_SYS_PBSIZE 282
+```
+
+## 日志功能
+```c
+CONFIG_LOG=y
+CONFIG_LOG_ERROR_RETURN=y
+```
+
+## 设备树
+```c
+CONFIG_OF_CONTROL=y
+```
+
+## LIBCOMMON_SUPPORT 通用库支持
