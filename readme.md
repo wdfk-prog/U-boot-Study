@@ -492,7 +492,7 @@ objdump -d start.o
 
 - [u-boot流程分析](./子目录/u-boot流程分析.md)
 
-# U -BOOT 配置
+# U-BOOT 配置
 ## 设置编译引导加载程序
 ### VPL（Very Early Program Loader）
 
@@ -545,5 +545,10 @@ CONFIG_LOG_ERROR_RETURN=y
 ```c
 CONFIG_OF_CONTROL=y
 ```
+### OFNODE_MULTI_TREE 多设备树
+
+### CONFIG_BLOBLIST 二进制设备树
 
 ## LIBCOMMON_SUPPORT 通用库支持
+
+## CONFIG_TRACE_EARLY 提前跟踪
