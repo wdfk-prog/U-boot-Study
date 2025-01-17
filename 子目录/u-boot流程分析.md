@@ -213,17 +213,17 @@ void board_init_f(ulong boot_flags)
 }
 ```
 
-## init_sequence_f 板级初始化调用列表	暂缓分析**
+## init_sequence_f 板级初始化调用列表	正在分析**
 
 ```c
 static const init_fnc_t init_sequence_f[] = {
 	setup_mon_len,	//设置监控长度
-#ifdef CONFIG_OF_CONTROL	//配置设备树控制
+#ifdef CONFIG_OF_CONTROL
 	fdtdec_setup,	//fdtdec初始化
 #endif
-#ifdef CONFIG_TRACE_EARLY	//配置早期跟踪
-	trace_early_init,
-#endif
+	initf_malloc,	//初始化malloc
+	arch_cpu_init,	/* 基本 Arch CPU 相关设置 */
+	initf_dm,		//初始化设备管理
 ```
 
 ### setup_mon_len
@@ -505,8 +505,400 @@ static inline bool fdt_chk_extra(void)
 }
 ```
 
-# lib
+# dm 设备管理
+## initf_dm
+```c
+static int initf_dm(void)
+{
+	int ret;
 
+	if (!CONFIG_IS_ENABLED(SYS_MALLOC_F))
+		return 0;
+
+	ret = dm_init_and_scan(true);
+	if (ret)
+		return ret;
+
+	ret = dm_autoprobe();
+	if (ret)
+		return ret;
+
+	if (IS_ENABLED(CONFIG_TIMER_EARLY)) {
+		ret = dm_timer_init();
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+```
+## drivers/core/root.c
+### dm_init_and_scan
+```c
+/**
+ * dm_init_and_scan（） - 初始化驱动程序模型结构并扫描设备
+ *
+ * 此函数初始化驱动程序树和 uclass 树的根，
+ * 然后扫描并绑定来自平台数据和 FDT 的可用设备。
+ * 这将调用 dm_init（） 来设置驱动程序模型结构。
+ *
+ * @pre_reloc_only： 如果为 true，则仅绑定具有特殊 devicetree 属性的节点，
+ * 或带有 DM_FLAG_PRE_RELOC 标志的驱动程序。如果为 false，则绑定所有驱动程序。
+ * 返回：OK 时为 0，出错时为 -ve
+ */
+```
+### dm_init
+```c
+/**
+ * dm_init（） - 初始化驱动模型结构
+ *
+ * 此函数将初始化驱动程序树和类树的根。
+ * 这需要在使用 DM 之前调用
+ *
+ * @of_live：启用 Live 设备树
+ * 返回：OK 时为 0，出错时为 -ve
+ */
+int dm_init(bool of_live)
+{
+	int ret;
+
+	if (CONFIG_IS_ENABLED(OF_PLATDATA_INST)) {
+		gd->uclass_root = &uclass_head;
+	} else {
+		//初始化uclass根
+		gd->uclass_root = &DM_UCLASS_ROOT_S_NON_CONST;
+		INIT_LIST_HEAD(DM_UCLASS_ROOT_NON_CONST);
+	}
+
+	if (CONFIG_IS_ENABLED(OF_PLATDATA_INST)) {
+		ret = dm_setup_inst();
+		if (ret) {
+			log_debug("dm_setup_inst() failed: %d\n", ret);
+			return ret;
+		}
+	} else {
+		//绑定root_info,并将指向绑定设备的指针返回到DM_ROOT_NON_CONST
+		ret = device_bind_by_name(NULL, false, &root_info,
+					  &DM_ROOT_NON_CONST);
+		if (ret)
+			return ret;
+		if (CONFIG_IS_ENABLED(OF_CONTROL))
+			dev_set_ofnode(DM_ROOT_NON_CONST, ofnode_root());
+		ret = device_probe(DM_ROOT_NON_CONST);
+		if (ret)
+			return ret;
+	}
+}
+```
+
+## drivers/core/device.c
+```c
+/**
+ * struct driver - 功能或外围设备的驱动程序
+ *
+ * 此字段包含设置新设备和删除新设备的方法。
+ * 设备需要信息来设置自身 - 这提供了
+ * 按 Plat 或 Device Tree 节点（我们通过查找找到
+ * 将兼容的字符串与 of_match） 匹配。
+ *
+ * 驱动程序都属于一个 uclass，代表
+ * 相同类型。驱动程序的公共元素可以在 uclass 中实现，
+ * 或 uclass 可以为
+ *它。
+ *
+ * @name：设备名称
+ * @id：标识我们所属的 uclass
+ * @of_match：要匹配的兼容字符串列表以及任何标识数据
+ * 对于每个。
+ * @bind：调用以将设备绑定到其驱动程序
+ * @probe：调用以探测设备，即激活它
+ * @remove：调用以删除设备，即停用设备
+ * @unbind：调用以取消设备与其驱动程序的绑定
+ * @of_to_plat：在 probe 之前调用以解码设备树数据
+ * @child_post_bind：在绑定新子项后调用
+ * @child_pre_probe：在探测子设备之前调用。该设备具有
+ * 内存已分配，但尚未探测。
+ * @child_post_remove：删除子设备后调用。设备
+ * 已分配内存，但其 device_remove（） 方法已被调用。
+ * @priv_auto：如果非零，则为私有数据的大小
+ * 在设备的 ->priv 指针中分配。如果为零，则驱动程序
+ * 负责分配所需的任何数据。
+ * @plat_auto：如果非零，则为
+ * 在设备的 ->plat 指针中分配的平台数据。
+ * 这通常仅对设备树感知驱动程序（具有
+ * of_match），因为使用 Plat 的驱动程序将拥有数据
+ * 在 U_BOOT_DRVINFO（） 实例中提供。
+ * @per_child_auto：每台设备都可以保存
+ * 其父级。如果需要，如果
+ * 值为非零。
+ * @per_child_plat_auto：公交车喜欢存储以下信息
+ * 它的子项。如果非零，则这是要分配的此数据的大小
+ * 在子指针的 parent_plat 中。
+ * @ops：特定于驱动程序的操作。这通常是一个函数列表
+ * 由驱动程序定义的指针，以实现所需的驱动程序功能
+ * UCLASS.
+ * @flags：驾驶员标志 - 请参阅“DM_FLAG_...”
+ * @acpi_ops：高级配置和电源接口 （ACPI） 操作，
+ * 允许设备将内容添加到传递给 Linux 的 ACPI 表中
+ */
+struct driver {
+	char *name;
+	enum uclass_id id;
+	const struct udevice_id *of_match;
+	int (*bind)(struct udevice *dev);
+	int (*probe)(struct udevice *dev);
+	int (*remove)(struct udevice *dev);
+	int (*unbind)(struct udevice *dev);
+	int (*of_to_plat)(struct udevice *dev);
+	int (*child_post_bind)(struct udevice *dev);
+	int (*child_pre_probe)(struct udevice *dev);
+	int (*child_post_remove)(struct udevice *dev);
+	int priv_auto;
+	int plat_auto;
+	int per_child_auto;
+	int per_child_plat_auto;
+	const void *ops;	/* driver-specific operations */
+	uint32_t flags;
+#if CONFIG_IS_ENABLED(ACPIGEN)
+	struct acpi_ops *acpi_ops;
+#endif
+};
+```
+
+### device_bind_by_name
+```c
+/**
+ * device_bind_by_name：创建设备并将其绑定到驱动程序
+ *
+ * 这是一个辅助函数，用于绑定不使用设备的设备
+ *树。
+ *
+ * @parent：指向设备父级的指针
+ * @pre_reloc_only：如果为 true，则仅在驱动程序的 DM_FLAG_PRE_RELOC 标志时绑定驱动程序
+ * 已设置。如果为 false，则始终绑定驱动程序。
+ * @info：此设备的名称和平台
+ * @devp：如果为非 NULL，则返回指向绑定设备的指针
+ * 返回：OK 时为 0，出错时为 -ve
+ */
+int device_bind_by_name(struct udevice *parent, bool pre_reloc_only,
+			const struct driver_info *info, struct udevice **devp)
+{
+	struct driver *drv;
+	uint plat_size = 0;
+	int ret;
+	//根据名字在段里面查找驱动
+	drv = lists_driver_lookup_name(info->name);
+	if (!drv)
+		return -ENOENT;
+	if (pre_reloc_only && !(drv->flags & DM_FLAG_PRE_RELOC))
+		return -EPERM;
+
+#if CONFIG_IS_ENABLED(OF_PLATDATA)
+	plat_size = info->plat_size;
+#endif
+	ret = device_bind_common(parent, drv, info->name, (void *)info->plat, 0,
+				 ofnode_null(), plat_size, devp);
+	if (ret)
+		return ret;
+
+	return ret;
+}
+```
+
+### device_bind_common
+```c
+
+static int device_bind_common(struct udevice *parent, const struct driver *drv,
+			      const char *name, void *plat,
+			      ulong driver_data, ofnode node,
+			      uint of_plat_size, struct udevice **devp)
+{
+	struct udevice *dev;
+	struct uclass *uc;
+	int size, ret = 0;
+	bool auto_seq = true;
+	void *ptr;
+
+	if (CONFIG_IS_ENABLED(OF_PLATDATA_NO_BIND))
+		return -ENOSYS;
+
+	if (devp)
+		*devp = NULL;
+	if (!name)
+		return -EINVAL;
+
+	ret = uclass_get(drv->id, &uc);
+	if (ret) {
+		dm_warn("Missing uclass for driver %s\n", drv->name);
+		return ret;
+	}
+}
+```
+
+## drivers/core/uclass.c
+### uclass
+```c
+/**
+ * struct uclass - 一个 U-Boot 驱动类，收集了类似的驱动程序
+ *
+ * uclass 为特定函数提供接口，该函数是
+ * 由一个或多个驱动程序实现。每个驱动程序都属于一个 uclass
+ * 如果它是该 uclass 中的唯一驱动程序。一个例子 uclass 是 GPIO，它
+ * 提供更改读取输入、设置和清除输出等功能。
+ * 可能有用于片上 SoC GPIO 组、I2C GPIO 扩展器和
+ * PMIC IO 线路，全部通过 uclass 以统一方式提供。
+ *
+ * @priv_：此 uclass 的私有数据（不访问驱动程序模型外部）
+ * @uc_drv：uclass 本身的驱动程序，不要与
+ * 'struct driver'
+ * @dev_head：此 uclass 中的设备列表（设备连接到其
+ * uclass 调用其 bind 方法时）
+ * @sibling_node：uclasses 链表中的下一个 uclass
+ */
+struct uclass {
+	void *priv_;
+	struct uclass_driver *uc_drv;
+	struct list_head dev_head;
+	struct list_head sibling_node;
+};
+```
+
+### uclass_driver
+```c
+/**
+ * struct uclass_driver - uclass 的驱动程序
+ *
+ * uclass_driver为一组相关的
+ *司机。
+ *
+ * @name：uclass 驱动程序的名称
+ * @id：此 uclass 的 ID 号
+ * @post_bind：在新设备绑定到此 uclass 后调用
+ * @pre_unbind：在设备与此 uclass 解绑之前调用
+ * @pre_probe：在探测新设备之前调用
+ * @post_probe：探测新设备后调用
+ * @pre_remove：在移除设备之前调用
+ * @child_post_bind：在子级绑定到此 uclass 中的设备后调用
+ * @child_pre_probe：在探测此 uclass 中的子对象之前调用
+ * @child_post_probe：探测此 uclass 中的子对象后调用
+ * @init：调用以设置 uclass
+ * @destroy：调用以销毁 uclass
+ * @priv_auto：如果非零，则为私有数据的大小
+ * 在 uclass 的 ->priv 指针中分配。如果为零，则 uclass
+ * 驱动程序负责分配所需的任何数据。
+ * @per_device_auto：每台设备都可以保存拥有的私有数据
+ * 由 uclass.如果需要，如果
+ * 值为非零。
+ * @per_device_plat_auto：每个设备都可以保存平台数据
+ * 由 uclass 拥有，为 'dev->uclass_plat'。如果该值为非零，则
+ * 则此 ID 将自动分配。
+ * @per_child_auto：每个子设备（此
+ * uclass） 可以保存 device/uclass 的父数据。此值仅为
+ * 如果此成员在驱动程序中为 0，则用作回退。
+ * @per_child_plat_auto：公交车喜欢存储以下信息
+ * 它的子项。如果非零，则这是要分配的此数据的大小
+ * 在子设备的 parent_plat 指针中。此值仅用作
+ * 如果此成员在驱动程序中为 0，则为回退。
+ * @flags： 此 uclass 的标志 ''（DM_UC_...）``
+ */
+struct uclass_driver {
+	const char *name;
+	enum uclass_id id;
+	int (*post_bind)(struct udevice *dev);
+	int (*pre_unbind)(struct udevice *dev);
+	int (*pre_probe)(struct udevice *dev);
+	int (*post_probe)(struct udevice *dev);
+	int (*pre_remove)(struct udevice *dev);
+	int (*child_post_bind)(struct udevice *dev);
+	int (*child_pre_probe)(struct udevice *dev);
+	int (*child_post_probe)(struct udevice *dev);
+	int (*init)(struct uclass *class);
+	int (*destroy)(struct uclass *class);
+	int priv_auto;
+	int per_device_auto;
+	int per_device_plat_auto;
+	int per_child_auto;
+	int per_child_plat_auto;
+	uint32_t flags;
+};
+```
+### uclass_get
+```c
+int uclass_get(enum uclass_id id, struct uclass **ucp)
+{
+	struct uclass *uc;
+
+	/* Immediately fail if driver model is not set up */
+	if (!gd->uclass_root)
+		return -EDEADLK;
+	*ucp = NULL;
+	uc = uclass_find(id);	//遍历段中的uc->uc_drv->id
+	if (!uc) {
+		if (CONFIG_IS_ENABLED(OF_PLATDATA_INST))
+			return -ENOENT;
+		return uclass_add(id, ucp);	//没有找到则添加
+	}
+	*ucp = uc;
+
+	return 0;
+}
+```
+
+### uclass_add
+1. 分配
+```c
+static int uclass_add(enum uclass_id id, struct uclass **ucp)
+{
+	struct uclass_driver *uc_drv;
+	struct uclass *uc;
+	int ret;
+
+	*ucp = NULL;
+	uc_drv = lists_uclass_lookup(id);	//从段中查找uc_drv
+	if (!uc_drv) {
+		return -EPFNOSUPPORT;
+	}
+	uc = calloc(1, sizeof(*uc));
+	if (!uc)
+		return -ENOMEM;
+	if (uc_drv->priv_auto) {	//驱动分配私有数据
+		void *ptr;
+
+		ptr = calloc(1, uc_drv->priv_auto);
+		if (!ptr) {
+			ret = -ENOMEM;
+			goto fail_mem;
+		}
+		uclass_set_priv(uc, ptr);
+	}
+	uc->uc_drv = uc_drv;
+	INIT_LIST_HEAD(&uc->sibling_node);
+	INIT_LIST_HEAD(&uc->dev_head);
+	list_add(&uc->sibling_node, DM_UCLASS_ROOT_NON_CONST);
+
+	if (uc_drv->init) {	//驱动程序初始化
+		ret = uc_drv->init(uc);
+		if (ret)
+			goto fail;
+	}
+
+	*ucp = uc;
+
+	return 0;
+fail:
+	if (uc_drv->priv_auto) {
+		free(uclass_get_priv(uc));
+		uclass_set_priv(uc, NULL);
+	}
+	list_del(&uc->sibling_node);
+fail_mem:
+	free(uc);
+
+	return ret;
+}
+```
+
+# lib
 ## lib/initcall.c
 
 ### initcall_run_list 初始化调用列表
@@ -736,7 +1128,35 @@ static int notify_static(struct event *ev)
 
 ## common/console.c
 
-### puts 输出字符串 暂不分析***
+### puts 输出字符串 暂不分析**
+
+## common/log.c 暂不分析**
+
+## common/dlmalloc.c
+dlmalloc 是 Doug Lea 实现的一种动态内存分配器，广泛用于嵌入式系统和操作系统中。它以其高效和灵活的内存管理机制而著称。以下是 dlmalloc 的工作原理和关键概念：
+
+1. 内存池（Memory Pool）
+dlmalloc 使用一个或多个内存池来管理内存。内存池是由操作系统分配的一大块连续内存区域，dlmalloc 在这个区域内进行内存分配和释放操作。
+
+2. 空闲块和已分配块（Free and Allocated Blocks）
+内存池被分割成多个块，每个块可以是空闲的或已分配的。每个块都有一个头部（header），包含块的大小和状态（空闲或已分配）。
+
+3. 双向链表（Doubly Linked List）
+空闲块通过双向链表链接在一起。每个空闲块的头部包含指向前一个和后一个空闲块的指针。这使得 dlmalloc 可以高效地插入和删除空闲块。
+
+4. 分割和合并（Splitting and Coalescing）
+分割：当请求的内存大小小于某个空闲块的大小时，dlmalloc 会将这个空闲块分割成两个块，一个满足请求大小，另一个继续作为空闲块。
+合并：当释放一个块时，dlmalloc 会检查相邻的块是否也是空闲的。如果是，它们会被合并成一个更大的空闲块。这减少了内存碎片，提高了内存利用率。
+5. 最佳适配（Best Fit）和首次适配（First Fit）
+dlmalloc 使用最佳适配或首次适配策略来找到合适的空闲块：
+
+最佳适配：在所有空闲块中找到最小的、但足够大的块来满足请求。这减少了内存碎片，但可能需要更多的时间来搜索。
+首次适配：从头开始搜索，找到第一个足够大的块。这速度较快，但可能会增加内存碎片。
+6. 扩展和收缩（Expansion and Contraction）
+当内存池中的空闲块不足以满足请求时，dlmalloc 可以向操作系统请求更多的内存（扩展）。当内存使用减少时，它也可以将未使用的内存归还给操作系统（收缩）。
+
+7. 内存对齐（Memory Alignment）
+dlmalloc 确保分配的内存块是对齐的，以满足特定硬件或数据结构的要求。这通常通过调整块的起始地址来实现。
 
 # include
 
@@ -993,4 +1413,191 @@ static inline ulong bootstage_error(enum bootstage_id id)
 	show_boot_progress(-id);
 	return 0;
 }
+```
+
+# arch/arm
+## mach-stm32
+### arch/arm/mach-stm32/soc.c
+- 配置MPU区域
+```c
+int arch_cpu_init(void)
+{
+	int i;
+
+	struct mpu_region_config stm32_region_config[] = {
+#if defined(CONFIG_STM32F4)
+		{ 0x00000000, REGION_0, 
+		XN_DIS, 					//启用执行保护
+		PRIV_RW_USR_RW,				//特权读写,用户读写
+		O_I_WB_RD_WR_ALLOC, 		//外部内部写缓存+读写分配缓存
+		REGION_512MB },
+#endif
+		{ 0x90000000, REGION_1, 
+		XN_DIS, 					//启用执行保护
+		PRIV_RW_USR_RW,				//特权读写,用户读写
+		SHARED_WRITE_BUFFERED, 		//多个处理器共享的内存映射外设
+		REGION_256MB },
+
+#if defined(CONFIG_STM32F7) || defined(CONFIG_STM32H7)
+		{ 0xC0000000, REGION_0, 
+		XN_DIS, 					//启用执行保护
+		PRIV_RW_USR_RW,				//特权读写,用户读写
+		O_I_WB_RD_WR_ALLOC,			//外部内部写缓存+读写分配缓存
+		REGION_512MB },	
+#endif
+	};
+
+	disable_mpu();
+	for (i = 0; i < ARRAY_SIZE(stm32_region_config); i++)
+		mpu_config(&stm32_region_config[i]);
+	enable_mpu();
+
+	return 0;
+}
+```
+
+##  armv7m
+- 参考[PM0253 Cortex®-M7 编程手册 P221](../学习芯片/ART-PI/PM0253%20Cortex®-M7%20编程手册.pdf)
+
+### arch/arm/cpu/armv7m/mpu.c
+```c
+#define V7M_MPU_CTRL_ENABLE		BIT(0)			//使能MPU
+#define V7M_MPU_CTRL_DISABLE		(0 << 0)
+#define V7M_MPU_CTRL_HFNMIENA		BIT(1)		//在硬故障、NMI 和 FAULTMASK 处理程序期间启用 MPU 的操作。 
+#define V7M_MPU_CTRL_PRIVDEFENA		BIT(2)		//允许特权软件访问默认内存映射
+
+#define VALID_REGION			BIT(4)	//1：处理器：将 MPU_RNR 的值更新为 REGION 字段的值更新 REGION 字段中指定的区域的基地址。 始终读为零。
+
+void disable_mpu(void)
+{
+	writel(0, &V7M_MPU->ctrl);
+}
+
+void enable_mpu(void)
+{
+	writel(V7M_MPU_CTRL_ENABLE | V7M_MPU_CTRL_PRIVDEFENA, &V7M_MPU->ctrl);
+
+	/* Make sure new mpu config is effective for next memory access */
+	dsb();
+	isb();	/* Make sure instruction stream sees it */
+}
+
+void mpu_config(struct mpu_region_config *reg_config)
+{
+	uint32_t attr;
+
+	attr = get_attr_encoding(reg_config->mr_attr);
+	//写入配置的区域以及区域保护的内存开始地址
+	writel(reg_config->start_addr | VALID_REGION | reg_config->region_no,
+	       &V7M_MPU->rbar);
+	//写入配置的区域大小以及区域保护的内存属性
+	writel(reg_config->xn << XN_SHIFT | reg_config->ap << AP_SHIFT | attr
+		| reg_config->reg_size << REGION_SIZE_SHIFT | ENABLE_REGION
+	       , &V7M_MPU->rasr);
+}
+```
+### arch/arm/include/asm/armv7_mpu.h
+- 内存保护单元 (MPU) 将内存映射划分为多个区域，并定义每个区域的位置、大小、访问权限和内存属性。它支持：
+	- 每个区域都有独立的属性设置。 
+	- 区域重叠。 
+	- 将内存属性导出到系统。
+- 内存属性会影响对区域的内存访问行为。
+	- Cortex®M7 MPU 定义：
+	- 8 个或 16 个单独的内存区域，0-7 或 0-15。
+	- 背景区域
+- 当内存区域重叠时，内存访问会受到编号最高的区域的属性的影响。例如，区域 7 的属性优先于与区域 7 重叠的任何区域的属性。
+- Cortex®-M7 MPU 内存映射是统一的。这意味着指令访问和数据访问具有相同的区域设置。
+- 如果程序访问 MPU 禁止的内存位置，处理器将生成 MemManage 故障。这会导致故障异常，并可能导致 OS 环境中的进程终止。在 OS 环境中，内核可以根据要执行的进程动态更新 MPU 区域设置。通常，嵌入式 OS 使用 MPU 进行内存保护。
+
+- WT（Write-Through）Write-Through 是一种缓存策略，当处理器写入数据到缓存时，数据会立即写入到主存（内存）中。这种策略确保缓存和主存中的数据始终保持一致，但会导致较高的写操作延迟，因为每次写操作都需要访问主存。
+- WB（Write-Back）Write-Back 是另一种缓存策略，当处理器写入数据到缓存时，数据只会写入到缓存中，而不会立即写入到主存。只有当缓存行被替换或刷新时，数据才会写入到主存。这种策略可以减少写操作的延迟，提高系统性能，但在缓存和主存之间的数据一致性管理上更加复杂。
+- alloc 通常指的是缓存分配（allocation）.配置是否分配（allocation）是为了控制在特定情况下是否为数据分配新的缓存行。这对于优化系统性能和管理缓存行为非常重要。
+	- 性能优化：
+		- 写分配（Write Allocate）：在写操作时，如果数据不在缓存中，处理器会将数据从主存加载到缓存中，并为其分配一个新的缓存行。这种策略可以提高后续对该数据的访问性能。
+		- 无写分配（No Write Allocate）：在写操作时，如果数据不在缓存中，处理器不会为其分配新的缓存行，而是直接写入主存。这种策略可以减少缓存的占用，适用于写操作较少的场景。
+	- 缓存一致性：
+		- 读分配（Read Allocate）：在读操作时，如果数据不在缓存中，处理器会将数据从主存加载到缓存中，并为其分配一个新的缓存行。这种策略可以提高后续对该数据的访问性能。
+		- 无读分配（No Read Allocate）：在读操作时，如果数据不在缓存中，处理器不会为其分配新的缓存行，而是直接从主存读取数据。这种策略可以减少缓存的占用，适用于读操作较少的场景。
+```c
+//访问权限字段
+enum ap {
+	NO_ACCESS = 0,	//所有访问都会产生权限错误		   特权权限[无]		用户权限[无]
+	PRIV_RW_USR_NO,	//仅从特权软件访问				   特权权限[读写]	用户权限[无]
+	PRIV_RW_USR_RO,	//非特权软件的写入会产生权限错误	特权权限[读写]	 用户权限[只读]
+	PRIV_RW_USR_RW,	//完全访问权限					 特权权限[读写]	 用户权限[读写]
+	UNPREDICTABLE,	//不可预测的访问权限
+	PRIV_RO_USR_NO,	//仅从特权软件访问				   特权权限[只读]	 用户权限[无]
+	PRIV_RO_USR_RO,	//只读，由特权或非特权软件读取		特权权限[只读]	 用户权限[只读]
+};
+//属性
+enum mr_attr {
+	STRONG_ORDER = 0,		//对强有序内存的所有访问均按程序顺序进行。所有强有序区域均假定为共享的。
+	SHARED_WRITE_BUFFERED,	//多个处理器共享的内存映射外设
+	O_I_WT_NO_WR_ALLOC,		//外部和内部直写。无写入分配
+	O_I_WB_NO_WR_ALLOC,		//外部和内部写缓存。无写入分配
+	O_I_NON_CACHEABLE,		//外部和内部均不可缓存
+	O_I_WB_RD_WR_ALLOC,		//外部和内部写缓存。写入和读取分配。
+	DEVICE_NON_SHARED,		//非共享设备
+};
+//指令访问禁止位
+enum xn {
+	XN_DIS = 0,	//启用指令提取
+	XN_EN,		//禁用指令提取
+};
+```
+
+## include/asm
+### arch/arm/include/asm/io.h
+#### write
+1. 定义局部变量：首先，定义了一个局部变量 __v，类型为 u32（无符号 32 位整数），并将传入的值 v 赋值给 __v。这样做的目的是确保值 v 在后续操作中不会被修改。
+2. 内存屏障：调用 __iowmb() 函数，这是一个内存屏障函数，用于确保所有之前的内存写操作在执行后续的 I/O 操作之前完成。内存屏障在多核处理器和复杂的内存系统中非常重要，以确保内存操作的顺序性
+3. 写入寄存器：调用 __arch_putl(__v, c) 函数，将值 __v 写入到地址 c 所指向的寄存器中。__arch_putl 是一个架构相关的函数，用于执行实际的写操作。
+
+- 在这段代码中，__iowmb() 使用的是 dmb（数据内存屏障）而不是 dsb（数据同步屏障），主要原因是 dmb 足以确保内存访问的顺序性，而不需要 dsb 提供的更严格的同步保证。
+	- 原因分析：
+	- 内存访问顺序： dmb 确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。这对于确保写操作的顺序性已经足够。例如，在写入寄存器之前，确保所有之前的内存写操作已经完成。
+	- 性能考虑： dsb 是一种更严格的屏障指令，不仅影响内存访问，还会影响所有类型的指令执行顺序。使用 dsb 会导致更大的性能开销，因为它会强制处理器等待所有之前的指令完成，并刷新所有的缓存和写缓冲区。对于大多数内存写操作来说，这种严格的同步保证通常是不必要的。
+	- 适用场景： 在大多数情况下，内存写操作只需要确保内存访问的顺序性，而不需要确保所有类型的指令执行顺序。因此，使用 dmb 可以提供足够的保证，同时避免 dsb 带来的性能开销。
+
+- DSB的使用场景
+	1. 系统控制寄存器的修改
+	2. 关键的同步操作,例如，在实现自旋锁或其他同步原语时。
+	3. 缓存和写缓冲区的刷新
+	4. 处理器模式切换(如从用户模式切换到内核模式）时，需要确保所有之前的指令和内存操作都已完成。这时需要使用 DSB。
+```c
+/* Generic virtual read/write. */
+#define __arch_getb(a)			(*(volatile unsigned char *)(a))
+#define __arch_getw(a)			(*(volatile unsigned short *)(a))
+#define __arch_getl(a)			(*(volatile unsigned int *)(a))
+#define __arch_getq(a)			(*(volatile unsigned long long *)(a))
+
+#define __arch_putb(v,a)		(*(volatile unsigned char *)(a) = (v))
+#define __arch_putw(v,a)		(*(volatile unsigned short *)(a) = (v))
+#define __arch_putl(v,a)		(*(volatile unsigned int *)(a) = (v))
+#define __arch_putq(v,a)		(*(volatile unsigned long long *)(a) = (v))
+
+#define writeb(v,c)	({ u8  __v = v; __iowmb(); __arch_putb(__v,c); __v; })
+#define writew(v,c)	({ u16 __v = v; __iowmb(); __arch_putw(__v,c); __v; })
+#define writel(v,c)	({ u32 __v = v; __iowmb(); __arch_putl(__v,c); __v; })
+#define writeq(v,c)	({ u64 __v = v; __iowmb(); __arch_putq(__v,c); __v; })
+```
+
+#### __iowmb 内存屏障
+- DSB（数据同步屏障）和 DMB（数据内存屏障）都是用于控制内存访问顺序的屏障指令，但它们在具体的行为和应用场景上有所不同。
+- DSB 是一种更严格的屏障指令，用于确保在其之前的所有内存访问操作（包括读和写）在其之后的内存访问操作之前完成。它不仅影响内存访问，还会影响所有类型的指令执行顺序。DSB 确保所有之前的指令都已完成，并且所有的缓存和写缓冲区都已刷新。
+- DMB 是一种较为宽松的屏障指令，用于确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。与 DSB 不同，DMB 只影响内存访问的顺序，不影响其他类型的指令执行顺序。DMB 确保内存访问的顺序性，但不强制刷新缓存或写缓冲区。
+
+```c
+#define ISB	asm volatile ("isb sy" : : : "memory")	//ISB（指令同步屏障）用于确保在其之前的所有指令在其之后的指令执行之前完成。
+#define DSB	asm volatile ("dsb sy" : : : "memory")	//DSB（数据同步屏障）用于确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。
+#define DMB	asm volatile ("dmb sy" : : : "memory")	//DMB（数据内存屏障）用于确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。
+
+// 在修改系统控制寄存器（如 MPU 配置）后，确保所有更改生效。在执行关键的同步操作时，确保所有之前的内存操作都已完成。
+#define mb()		dsb()
+#define rmb()		dsb()
+#define wmb()		dsb()
+
+// 在多核处理器中，确保一个核心的内存写操作在另一个核心的内存读操作之前完成。在共享内存的多线程程序中，确保内存操作的顺序性。
+#define __iormb()	dmb()
+#define __iowmb()	dmb()
 ```
