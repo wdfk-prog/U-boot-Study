@@ -213,7 +213,7 @@ void board_init_f(ulong boot_flags)
 }
 ```
 
-## init_sequence_f 板级初始化调用列表	正在分析**
+## init_sequence_f 板级初始化调用列表
 
 ```c
 static const init_fnc_t init_sequence_f[] = {
@@ -224,6 +224,49 @@ static const init_fnc_t init_sequence_f[] = {
 	initf_malloc,	//初始化malloc
 	arch_cpu_init,	/* 基本 Arch CPU 相关设置 */
 	initf_dm,		//初始化设备管理
+	env_init,		//初始化环境变量
+	init_baud_rate,	//初始化波特率设置
+	serial_init,
+	console_init_f,		/* stage 1 init of console */
+	display_options,	/* 打印u-boot版本 */
+	display_text_info,	/* 打印段信息 */
+#if defined(CONFIG_DISPLAY_BOARDINFO)
+	show_board_info,	/* 打印板子信息 */
+#endif
+	INIT_FUNC_WATCHDOG_INIT
+	INITCALL_EVENT(EVT_MISC_INIT_F),	//无效
+	INIT_FUNC_WATCHDOG_RESET
+	dram_init,		/* 配置可用的 RAM */
+	/*
+	 * 现在我们已经映射了 DRAM 并正常工作，我们可以
+	 * 重新定位代码并继续从 DRAM 运行。
+	 *
+	 * 在 RAM 末尾保留内存（按此顺序自上而下）：
+	 * - U-Boot 和 Linux 不会触及的区域（可选）
+	 * - 内核日志缓冲区
+	 * - 受保护的 RAM
+	 * - LCD 帧缓冲器
+	 * - 监控代码
+	 * - 板信息结构体
+	 */
+	setup_dest_addr,		//设置relocaddr,重定向的ram_top地址
+	reserve_round_4k,		//保留4k gd->relocaddr &= ~(4096 - 1);
+	reserve_uboot,			//sp地址 预留的u-boot的代码数据
+	reserve_malloc,			//sp地址 预留的堆空间
+	reserve_board,			//sp地址 预留Board Info结构体
+	reserve_global_data,	//sp地址 预留全局数据结构体
+	reserve_fdt,			//sp地址 预留fdt
+	reserve_stacks,			//sp地址 预留栈空间
+	dram_init_banksize,		//初始化dram大小
+	show_dram_config,		//显示dram配置
+	INIT_FUNC_WATCHDOG_RESET
+	setup_bdinfo,			//设置板子信息
+	display_new_sp,
+	INIT_FUNC_WATCHDOG_RESET
+#if !defined(CONFIG_OF_BOARD_FIXUP) || !defined(CONFIG_OF_INITIAL_DTB_READONLY)
+	reloc_fdt,				//重新定位fdt 将fdt放到relocaddr
+#endif
+	setup_reloc,			//计算reloc_off和拷贝gd到new_gd
 ```
 
 ### setup_mon_len
@@ -234,6 +277,212 @@ static const init_fnc_t init_sequence_f[] = {
 static int setup_mon_len(void)
 {
 	gd->mon_len = (ulong)__bss_end - (ulong)_start;
+	return 0;
+}
+```
+
+### init_baud_rate
+```c
+static int init_baud_rate(void)
+{
+	gd->baudrate = env_get_ulong("baudrate", 10, CONFIG_BAUDRATE);
+	return 0;
+}
+```
+
+### show_board_info
+- dts/upstream/src/arm/st/stm32h750i-art-pi.dts这里定义了
+- model = "RT-Thread STM32H750i-ART-PI board"
+```c
+int show_board_info(void)
+{
+	if (IS_ENABLED(CONFIG_OF_CONTROL)) {
+		int ret = -ENOSYS;
+
+		if (IS_ENABLED(CONFIG_SYSINFO))	//没有配置.配置了没信息
+			ret = try_sysinfo();
+
+		/* Fail back to the main 'model' if available */
+		if (ret) {
+			const char *model;
+			//从设备树中获取model型号
+			model = fdt_getprop(gd->fdt_blob, 0, "model", NULL);
+			if (model)
+				printf("Model: %s\n", model);
+		}
+	}
+
+	return checkboard();
+}
+```
+
+### setup_dest_addr 设置relocaddr
+```c
+static int setup_dest_addr(void)
+{
+	debug("Monitor len: %08x\n", gd->mon_len);
+	/*
+	 * Ram is setup, size stored in gd !!
+	 */
+	debug("Ram size: %08llX\n", (unsigned long long)gd->ram_size);
+
+	gd->ram_top = gd->ram_base + gd->ram_size;
+	gd->relocaddr = gd->ram_top;
+	debug("Ram top: %08llX\n", (unsigned long long)gd->ram_top);
+
+	return 0;
+}
+```
+
+### reserve_uboot 预留的u-boot的代码数据
+```c
+static int reserve_uboot(void)
+{
+	if (!(gd->flags & GD_FLG_SKIP_RELOC)) {
+		/*
+		 * 为U-Boot代码、数据和bss预留内存
+		 * 向下舍入到下一个 4 kB 限制
+		 */
+		gd->relocaddr -= gd->mon_len;
+		gd->relocaddr &= ~(4096 - 1);
+
+		debug("Reserving %dk for U-Boot at: %08lx\n",
+		      gd->mon_len >> 10, gd->relocaddr);
+	}
+
+	gd->start_addr_sp = gd->relocaddr;
+
+	return 0;
+}
+```
+
+### reserve_malloc 预留的堆空间
+- 给app预留了0x100000的堆空间,并且给环境变量预留了0x2000的空间
+```c
+#define CONFIG_SYS_MALLOC_LEN 0x100000
+#define CONFIG_ENV_SIZE 0x2000
+
+#define	TOTAL_MALLOC_LEN	(CONFIG_SYS_MALLOC_LEN + CONFIG_ENV_SIZE)
+static unsigned long reserve_stack_aligned(size_t size)
+{
+	return ALIGN_DOWN(gd->start_addr_sp - size, 16);
+}
+/* reserve memory for malloc() area */
+static int reserve_malloc(void)
+{
+	gd->start_addr_sp = reserve_stack_aligned(TOTAL_MALLOC_LEN);
+	debug("Reserving %dk for malloc() at: %08lx\n",
+	      TOTAL_MALLOC_LEN >> 10, gd->start_addr_sp);
+#ifdef CONFIG_SYS_NONCACHED_MEMORY
+	reserve_noncached();
+#endif
+
+	return 0;
+}
+```
+
+### reserve_board 预留Board Info结构体
+```c
+/* （永久） 分配一个 Board Info 结构体 */
+static int reserve_board(void)
+{
+	if (!gd->bd) {
+		gd->start_addr_sp = reserve_stack_aligned(sizeof(struct bd_info));
+		gd->bd = (struct bd_info *)map_sysmem(gd->start_addr_sp,
+						      sizeof(struct bd_info));
+		memset(gd->bd, '\0', sizeof(struct bd_info));
+		debug("Reserving %zu Bytes for Board Info at: %08lx\n",
+		      sizeof(struct bd_info), gd->start_addr_sp);
+	}
+	return 0;
+}
+```
+
+### reserve_global_data
+```c
+static int reserve_global_data(void)
+{
+	gd->start_addr_sp = reserve_stack_aligned(sizeof(gd_t));
+	gd->new_gd = (gd_t *)map_sysmem(gd->start_addr_sp, sizeof(gd_t));
+	debug("Reserving %zu Bytes for Global Data at: %08lx\n",
+	      sizeof(gd_t), gd->start_addr_sp);
+	return 0;
+}
+```
+
+### reserve_fdt
+```c
+static int reserve_fdt(void)
+{
+	if (!IS_ENABLED(CONFIG_OF_EMBED)) {
+		/*
+		 * 如果设备树位于映像的正上方
+		 * 那么我们必须重新定位它。如果它嵌入到数据中
+		 * 部分，则它将与其他数据一起重新定位。
+		 */
+		if (gd->fdt_blob) {
+			gd->boardf->fdt_size =
+				ALIGN(fdt_totalsize(gd->fdt_blob), 32);
+
+			gd->start_addr_sp = reserve_stack_aligned(
+				gd->boardf->fdt_size);
+			gd->boardf->new_fdt = map_sysmem(gd->start_addr_sp,
+							 gd->boardf->fdt_size);
+			debug("Reserving %lu Bytes for FDT at: %08lx\n",
+			      gd->boardf->fdt_size, gd->start_addr_sp);
+		}
+	}
+
+	return 0;
+}
+```
+
+### reserve_stacks
+```c
+//arch/arm/lib/stack.c
+int arch_reserve_stacks(void)
+{
+	/* setup stack pointer for exceptions */
+	//irq_sp（中断堆栈指针）设置为 start_addr_sp（堆栈起始地址）。
+	//这意味着异常处理将使用当前的堆栈起始地址作为堆栈指针
+	gd->irq_sp = gd->start_addr_sp;
+
+# if !defined(CONFIG_ARM64)
+	/* 为 abort-stack 保留 3 个字，加上 1 个字用于对齐 */
+	gd->start_addr_sp -= 16;
+# endif
+
+	return 0;
+}
+
+static int reserve_stacks(void)
+{
+	/* make stack pointer 16-byte aligned */
+	gd->start_addr_sp = reserve_stack_aligned(16);
+
+	/*
+	 * let the architecture-specific code tailor gd->start_addr_sp and
+	 * gd->irq_sp
+	 */
+	return arch_reserve_stacks();
+}
+```
+
+### dram_init_banksize
+```c
+//board/st/stm32h750-art-pi/stm32h750-art-pi.c
+int dram_init_banksize(void)
+{
+	fdtdec_setup_memory_banksize();
+
+	return 0;
+}
+
+__weak int dram_init_banksize(void)
+{
+	gd->bd->bi_dram[0].start = gd->ram_base;
+	gd->bd->bi_dram[0].size = get_effective_memsize();
+
 	return 0;
 }
 ```
@@ -296,7 +545,7 @@ relocate_done:
 ENDPROC(relocate_code)
 ```
 
-# common/board_r.c	暂缓分析**
+# common/board_r.c	暂缓分析***
 
 - r 通常表示 "relocation"（重定位)
 - 在 U-Boot 启动过程中，重定位是一个关键步骤，它将 U-Boot 从加载地址移动到运行地址，并修正所有相关的地址引用。
@@ -436,6 +685,18 @@ static int fdtdec_prepare_fdt(const void *blob)
 
 ![image-20250116131433785](./assets/image-20250116131433785.png)
 
+## fdtdec_setup_mem_size_base
+- 从设备树中读取`memory`节点,并设置`gd->ram_size`和`gd->ram_base`
+```c
+gd->ram_size = (phys_size_t)(res.end - res.start + 1);
+gd->ram_base = (unsigned long)res.start;
+
+memory@c0000000 {
+	device_type = "memory";
+	reg = <0xc0000000 0x2000000>;
+};
+```
+
 ## scripts/dtc/libfdt/libfdt_internal.h
 
 ### FDT_ASSUME_MASK
@@ -486,26 +747,26 @@ enum {
      */
     FDT_ASSUME_FRIENDLY = 1 << 2,
 };
-/** fdt_chk_basic() - see if basic checking of params and DT data is enabled */
+/* fdt_chk_basic() - see if basic checking of params and DT data is enabled */
 static inline bool fdt_chk_basic(void)
 {
 	return !(FDT_ASSUME_MASK & FDT_ASSUME_SANE);
 }
 
-/** fdt_chk_version() - see if we need to handle old versions of the DT */
+/* fdt_chk_version() - see if we need to handle old versions of the DT */
 static inline bool fdt_chk_version(void)
 {
 	return !(FDT_ASSUME_MASK & FDT_ASSUME_LATEST);
 }
 
-/** fdt_chk_extra() - see if extra checking is enabled */
+/* fdt_chk_extra() - see if extra checking is enabled */
 static inline bool fdt_chk_extra(void)
 {
 	return !(FDT_ASSUME_MASK & FDT_ASSUME_FRIENDLY);
 }
 ```
 
-# dm 设备管理
+# dm 设备管理 暂不分析***
 ## initf_dm
 ```c
 static int initf_dm(void)
@@ -532,6 +793,7 @@ static int initf_dm(void)
 	return 0;
 }
 ```
+
 ## drivers/core/root.c
 ### dm_init_and_scan
 ```c
@@ -707,7 +969,7 @@ int device_bind_by_name(struct udevice *parent, bool pre_reloc_only,
 
 ### device_bind_common
 ```c
-
+- 进行一系列初始化与绑定操作
 static int device_bind_common(struct udevice *parent, const struct driver *drv,
 			      const char *name, void *plat,
 			      ulong driver_data, ofnode node,
@@ -732,6 +994,17 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 		dm_warn("Missing uclass for driver %s\n", drv->name);
 		return ret;
 	}
+
+	dev = calloc(1, sizeof(struct udevice));
+	if (!dev)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&dev->sibling_node);
+	INIT_LIST_HEAD(&dev->child_head);
+	INIT_LIST_HEAD(&dev->uclass_node);
+#if CONFIG_IS_ENABLED(DEVRES)
+	INIT_LIST_HEAD(&dev->devres_head);
+#endif
 }
 ```
 
@@ -822,6 +1095,7 @@ struct uclass_driver {
 	uint32_t flags;
 };
 ```
+
 ### uclass_get
 ```c
 int uclass_get(enum uclass_id id, struct uclass **ucp)
@@ -845,7 +1119,7 @@ int uclass_get(enum uclass_id id, struct uclass **ucp)
 ```
 
 ### uclass_add
-1. 分配
+
 ```c
 static int uclass_add(enum uclass_id id, struct uclass **ucp)
 {
@@ -1128,9 +1402,9 @@ static int notify_static(struct event *ev)
 
 ## common/console.c
 
-### puts 输出字符串 暂不分析**
+### puts 输出字符串 暂不分析***
 
-## common/log.c 暂不分析**
+## common/log.c 暂不分析***
 
 ## common/dlmalloc.c
 dlmalloc 是 Doug Lea 实现的一种动态内存分配器，广泛用于嵌入式系统和操作系统中。它以其高效和灵活的内存管理机制而著称。以下是 dlmalloc 的工作原理和关键概念：
@@ -1600,4 +1874,398 @@ enum xn {
 // 在多核处理器中，确保一个核心的内存写操作在另一个核心的内存读操作之前完成。在共享内存的多线程程序中，确保内存操作的顺序性。
 #define __iormb()	dmb()
 #define __iowmb()	dmb()
+```
+
+# env
+## U_BOOT_ENV_LOCATION
+- 通过该宏定义环境变量的位置
+```c
+/*
+ * Define a callback that can be associated with variables.
+ * when associated through the ".callbacks" environment variable, the callback
+ * will be executed any time the variable is inserted, overwritten, or deleted.
+ *
+ * For SPL these are silently dropped to reduce code size, since environment
+ * callbacks are not supported with SPL.
+ */
+#ifdef CONFIG_XPL_BUILD
+#define U_BOOT_ENV_CALLBACK(name, callback) \
+	static inline __maybe_unused void _u_boot_env_noop_##name(void) \
+	{ \
+		(void)callback; \
+	}
+#else
+#define U_BOOT_ENV_CALLBACK(name, callback) \
+	ll_entry_declare(struct env_clbk_tbl, name, env_clbk) = \
+	{#name, callback}
+#endif
+
+```
+
+## default_environment
+```c
+const char default_environment[] = {
+#endif
+#ifndef CONFIG_USE_DEFAULT_ENV_FILE
+#ifdef	CONFIG_ENV_CALLBACK_LIST_DEFAULT
+	ENV_CALLBACK_VAR "=" CONFIG_ENV_CALLBACK_LIST_DEFAULT "\0"
+#endif
+#ifdef	CONFIG_ENV_FLAGS_LIST_DEFAULT
+	ENV_FLAGS_VAR "=" CONFIG_ENV_FLAGS_LIST_DEFAULT "\0"
+#endif
+#ifdef	CONFIG_USE_BOOTARGS
+	"bootargs="	CONFIG_BOOTARGS			"\0"
+#endif
+#ifdef	CONFIG_BOOTCOMMAND
+	"bootcmd="	CONFIG_BOOTCOMMAND		"\0"
+#endif
+#if defined(CONFIG_BOOTDELAY)
+	"bootdelay="	__stringify(CONFIG_BOOTDELAY)	"\0"
+#endif
+#if !defined(CONFIG_OF_SERIAL_BAUD) && defined(CONFIG_BAUDRATE) && (CONFIG_BAUDRATE >= 0)
+	"baudrate="	__stringify(CONFIG_BAUDRATE)	"\0"
+#endif
+#ifdef	CONFIG_LOADS_ECHO
+	"loads_echo="	__stringify(CONFIG_LOADS_ECHO)	"\0"
+#endif
+#ifdef	CONFIG_ETHPRIME
+	"ethprime="	CONFIG_ETHPRIME			"\0"
+#endif
+#ifdef	CONFIG_USE_IPADDR
+	"ipaddr="	CONFIG_IPADDR			"\0"
+#endif
+#ifdef	CONFIG_USE_SERVERIP
+	"serverip="	CONFIG_SERVERIP			"\0"
+#endif
+#ifdef	CONFIG_SYS_DISABLE_AUTOLOAD
+	"autoload=0\0"
+#endif
+#ifdef	CONFIG_PREBOOT_DEFINED
+	"preboot="	CONFIG_PREBOOT			"\0"
+#endif
+#ifdef	CONFIG_USE_ROOTPATH
+	"rootpath="	CONFIG_ROOTPATH			"\0"
+#endif
+#ifdef	CONFIG_USE_GATEWAYIP
+	"gatewayip="	CONFIG_GATEWAYIP		"\0"
+#endif
+#ifdef	CONFIG_USE_NETMASK
+	"netmask="	CONFIG_NETMASK			"\0"
+#endif
+#ifdef	CONFIG_USE_HOSTNAME
+	"hostname="	CONFIG_HOSTNAME			"\0"
+#endif
+#ifdef CONFIG_USE_BOOTFILE
+	"bootfile="	CONFIG_BOOTFILE			"\0"
+#endif
+#ifdef	CONFIG_SYS_LOAD_ADDR
+	"loadaddr="	__stringify(CONFIG_SYS_LOAD_ADDR)"\0"
+#endif
+#ifdef	CONFIG_ENV_VARS_UBOOT_CONFIG
+	"arch="		CONFIG_SYS_ARCH			"\0"
+#ifdef CONFIG_SYS_CPU
+	"cpu="		CONFIG_SYS_CPU			"\0"
+#endif
+#ifdef CONFIG_SYS_BOARD
+	"board="	CONFIG_SYS_BOARD		"\0"
+	"board_name="	CONFIG_SYS_BOARD		"\0"
+#endif
+#ifdef CONFIG_SYS_VENDOR
+	"vendor="	CONFIG_SYS_VENDOR		"\0"
+#endif
+#ifdef CONFIG_SYS_SOC
+	"soc="		CONFIG_SYS_SOC			"\0"
+#endif
+#ifdef CONFIG_USB_HOST
+	"usb_ignorelist="
+#ifdef CONFIG_USB_KEYBOARD
+	/* Ignore Yubico devices. Currently only a single USB keyboard device is
+	 * supported and the emulated HID keyboard Yubikeys present is useless
+	 * as keyboard.
+	 */
+	"0x1050:*,"
+#endif
+	"\0"
+#endif
+#ifdef CONFIG_ENV_IMPORT_FDT
+	"env_fdt_path="	CONFIG_ENV_FDT_PATH		"\0"
+#endif
+#endif
+#if defined(CONFIG_BOOTCOUNT_BOOTLIMIT) && (CONFIG_BOOTCOUNT_BOOTLIMIT > 0)
+	"bootlimit="	__stringify(CONFIG_BOOTCOUNT_BOOTLIMIT)"\0"
+#endif
+#ifdef CONFIG_MTDIDS_DEFAULT
+	 "mtdids="	CONFIG_MTDIDS_DEFAULT		"\0"
+#endif
+#ifdef CONFIG_MTDPARTS_DEFAULT
+	"mtdparts="	CONFIG_MTDPARTS_DEFAULT		"\0"
+#endif
+#ifdef CONFIG_EXTRA_ENV_TEXT
+	/* This is created in the Makefile */
+	CONFIG_EXTRA_ENV_TEXT
+#endif
+#ifdef	CFG_EXTRA_ENV_SETTINGS
+	CFG_EXTRA_ENV_SETTINGS
+#endif
+#ifdef CONFIG_OF_SERIAL_BAUD
+	/* Padding for baudrate at the end when environment is writable */
+	"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+#endif
+	"\0"
+#else /* CONFIG_USE_DEFAULT_ENV_FILE */
+#include "generated/defaultenv_autogenerated.h"
+#endif
+#ifdef DEFAULT_ENV_INSTANCE_EMBEDDED
+	}
+#endif
+};
+
+const char default_environment[] = {
+  	"bootargs=console=ttySTM0,2000000 root=/dev/ram "
+    "loglevel=8\000bootcmd=bootm "
+    "90080000\000bootdelay=3\000baudrate=2000000\000loadaddr="
+    "0xc1800000\000arch=arm\000cpu=armv7m\000board=stm32h750-art-pi\000board_"
+    "name=stm32h750-art-pi\000vendor=st\000soc=stm32h7\000kernel_addr_r="
+    "0xC0008000\000fdtfile=stm32h750i-art-pi.dtb\000fdt_addr_r="
+    "0xC0408000\000scriptaddr=0xC0418000\000pxefile_addr_r="
+    "0xC0428000\000ramdisk_addr_r=0xC0438000\000mmc_boot=if mmc dev ${devnum}; "
+    "then devtype=mmc; run scan_dev_for_boot_part; fi\000boot_prefixes=/ "
+    "/boot/\000boot_scripts=boot.scr.uimg "
+    "boot.scr\000boot_script_dhcp=boot.scr.uimg\000boot_targets=mmc0 "
+    "\000boot_syslinux_conf=extlinux/extlinux.conf\000boot_extlinux=sysboot "
+    "${devtype} ${devnum}:${distro_bootpart} any ${scriptaddr} "
+    "${prefix}${boot_syslinux_conf}\000scan_dev_for_extlinux=if test -e "
+    "${devtype} ${devnum}:${distro_bootpart} ${prefix}${boot_syslinux_conf}; "
+    "then echo Found ${prefix}${boot_syslinux_conf}; run boot_extlinux; echo "
+    "EXTLINUX FAILED: continuing...; fi\000boot_a_script=load ${devtype} "
+    "${devnum}:${distro_bootpart} ${scriptaddr} ${prefix}${script}; source "
+    "${scriptaddr}\000scan_dev_for_scripts=for script in ${boot_scripts}; do "
+    "if test -e ${devtype} ${devnum}:${distro_bootpart} ${prefix}${script}; "
+    "then echo Found U-Boot script ${prefix}${script}; run boot_a_script; echo "
+    "SCRIPT FAILED: continuing...; fi; done\000scan_dev_for_boot=echo Scanning "
+    "${devtype} ${devnum}:${distro_bootpart}...; for prefix in "
+    "${boot_prefixes}; do run scan_dev_for_extlinux; run scan_dev_for_scripts; "
+    "done;\000scan_dev_for_boot_part=part list ${devtype} ${devnum} -bootable "
+    "devplist; env exists devplist || setenv devplist 1; for distro_bootpart "
+    "in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} "
+    "bootfstype; then part uuid ${devtype} ${devnum}:${distro_bootpart} "
+    "distro_bootpart_uuid ; run scan_dev_for_boot; fi; done; setenv "
+    "devplist\000bootcmd_mmc0=devnum=0; run mmc_boot\000distro_bootcmd=for "
+    "target in ${boot_targets}; do run bootcmd_${target}; done\000\000"}
+```
+
+## env_locations
+```c
+static enum env_location env_locations[] = {
+#ifdef CONFIG_ENV_IS_IN_EEPROM
+	ENVL_EEPROM,
+#endif
+#ifdef CONFIG_ENV_IS_IN_EXT4
+	ENVL_EXT4,
+#endif
+#ifdef CONFIG_ENV_IS_IN_FAT
+	ENVL_FAT,
+#endif
+#ifdef CONFIG_ENV_IS_IN_FLASH
+	ENVL_FLASH,
+#endif
+#ifdef CONFIG_ENV_IS_IN_MMC
+	ENVL_MMC,
+#endif
+#ifdef CONFIG_ENV_IS_IN_NAND
+	ENVL_NAND,
+#endif
+#ifdef CONFIG_ENV_IS_IN_NVRAM
+	ENVL_NVRAM,
+#endif
+#ifdef CONFIG_ENV_IS_IN_REMOTE
+	ENVL_REMOTE,
+#endif
+#ifdef CONFIG_ENV_IS_IN_SPI_FLASH
+	ENVL_SPI_FLASH,
+#endif
+#ifdef CONFIG_ENV_IS_IN_UBI
+	ENVL_UBI,
+#endif
+#ifdef CONFIG_ENV_IS_NOWHERE
+	ENVL_NOWHERE,
+#endif
+};
+```
+
+## env/env.c
+- 从其他存储位置加载环境变量
+- 其他地方没有存储则执行默认的环境变量
+- 这样可以在使用在其他地方配置好环境变量,然后在u-boot中直接使用
+
+### env_init
+```c
+int env_init(void)
+{
+	struct env_driver *drv;
+	int ret = -ENOENT;
+	int prio;
+	// 从优先级0开始查找环境驱动,直到没有环境驱动
+	for (prio = 0; (drv = env_driver_lookup(ENVOP_INIT, prio)); prio++) {
+		// 如果环境驱动的init函数存在,则调用init函数
+		if (!drv->init || !(ret = drv->init())) // 如果初始化成功
+			env_set_inited(drv->location);
+		if (ret == -ENOENT) // 如果不需要初始化
+			env_set_inited(drv->location);	//gd->env_has_init |= BIT(location);
+
+		debug("%s: Environment %s init done (ret=%d)\n", __func__,
+		      drv->name, ret);
+
+		if (gd->env_valid == ENV_INVALID)
+			ret = -ENOENT;
+	}
+	// 如果没有找到环境驱动,则返回-ENOENT
+	if (!prio)
+		return -ENODEV;
+	// 找到了环境驱动,但是环境无效,则使用默认环境
+	if (ret == -ENOENT) {
+		gd->env_addr = (ulong)&default_environment[0];
+		gd->env_valid = ENV_VALID;
+
+		return 0;
+	}
+
+	return ret;
+}
+```
+
+### env_driver_lookup
+- 根据优先级和操作查找环境驱动并返回
+```c
+static struct env_driver *env_driver_lookup(enum env_operation op, int prio)
+{
+	enum env_location loc = env_get_location(op, prio);
+	struct env_driver *drv;
+
+	if (loc == ENVL_UNKNOWN)
+		return NULL;
+
+	drv = _env_driver_lookup(loc);
+	if (!drv) {
+		debug("%s: No environment driver for location %d\n", __func__,
+		      loc);
+		return NULL;
+	}
+
+	return drv;
+}
+```
+
+### arch_env_get_location
+- 根据优先级返回环境位置
+```c
+__weak enum env_location arch_env_get_location(enum env_operation op, int prio)
+{
+	if (prio >= ARRAY_SIZE(env_locations))
+		return ENVL_UNKNOWN;
+
+	return env_locations[prio];
+}
+```
+
+### _env_driver_lookup
+- 在段中查找环境驱动,匹配符合的环境位置
+```c
+static struct env_driver *_env_driver_lookup(enum env_location loc)
+{
+	struct env_driver *drv;
+	const int n_ents = ll_entry_count(struct env_driver, env_driver);
+	struct env_driver *entry;
+
+	drv = ll_entry_start(struct env_driver, env_driver);
+	for (entry = drv; entry != drv + n_ents; entry++) {
+		if (loc == entry->location)
+			return entry;
+	}
+
+	/* Not found */
+	return NULL;
+}
+```
+
+## env/common.c
+### env_get_from_linear
+```c
+static int env_get_from_linear(const char *env, const char *name, char *buf,
+			       unsigned len)
+{
+	const char *p, *end;
+	size_t name_len;
+
+	if (name == NULL || *name == '\0')
+		return -1;
+
+	name_len = strlen(name);
+
+	for (p = env; *p != '\0'; p = end + 1) {
+		const char *value;
+		unsigned res;
+		//识别到数组结束符
+		for (end = p; *end != '\0'; ++end)
+			if (end - env >= CONFIG_ENV_SIZE)
+				return -1;
+
+		if (strncmp(name, p, name_len) || p[name_len] != '=')
+			continue;
+		//找到name
+		value = &p[name_len + 1];
+
+		res = end - value;
+		//拷贝环境变量的值
+		memcpy(buf, value, min(len, res + 1));
+
+		if (len <= res) {
+			buf[len - 1] = '\0';
+			printf("env_buf [%u bytes] too small for value of \"%s\"\n",
+			       len, name);
+		}
+
+		return res;
+	}
+
+	return -1;
+}
+```
+
+## env/nowhere.c 
+- 环墫位置为NOWHERE,无处可去的默认位置会执行这里
+- 根据env_locations的定义,这里是最低优先级的执行位置
+
+```c
+U_BOOT_ENV_LOCATION(nowhere) = {
+	.location	= ENVL_NOWHERE,
+	.init		= env_nowhere_init,	//gd->env_valid = ENV_INVALID;
+	.load		= env_nowhere_load,
+	ENV_NAME("nowhere")
+};
+```
+
+# serial
+## drivers/seria
+### serial-uclass.c
+
+# DRAM
+- board/st/stm32h750-art-pi/stm32h750-art-pi.c
+```c
+int dram_init(void)
+{
+	struct udevice *dev;
+	int ret;
+
+	ret = uclass_get_device(UCLASS_RAM, 0, &dev);
+	if (ret) {
+		debug("DRAM init failed: %d\n", ret);
+		return ret;
+	}
+
+	if (fdtdec_setup_mem_size_base() != 0)
+		ret = -EINVAL;
+
+	return ret;
+}
 ```

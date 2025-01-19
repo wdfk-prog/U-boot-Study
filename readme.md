@@ -551,14 +551,23 @@ CONFIG_OF_CONTROL=y
 
 ### CONFIG_OF_LIVE 动态设备树
 
+### CONFIG_OF_REAL 设备树
+
 ### CONFIG_OF_PLATDATA_INST 
 
 ### OF_PLATDATA_DRIVER_RT 
 
 ### OF_PLATDATA_RT 
 
+### DM_SEQ_ALIAS  设备别名
+
 ## LIBCOMMON_SUPPORT 通用库支持
 
 ## CONFIG_TRACE_EARLY 提前跟踪
 
 ## CONFIG_DM_EVENT 驱动事件支持
+
+## CONFIG_SYSINFO 系统信息
+
+## CONFIG_MACH_TYPE
+- 机器类型是一个唯一的标识符，用于区分不同的硬件平台。每个硬件平台都有一个唯一的机器类型编号，这个编号在 U-Boot 和 Linux 内核中用于识别和初始化特定的硬件平台。
