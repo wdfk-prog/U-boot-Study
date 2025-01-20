@@ -545,7 +545,7 @@ relocate_done:
 ENDPROC(relocate_code)
 ```
 
-# common/board_r.c	正在分析***
+# common/board_r.c
 
 - r 通常表示 "relocation"（重定位)
 - 在 U-Boot 启动过程中，重定位是一个关键步骤，它将 U-Boot 从加载地址移动到运行地址，并修正所有相关的地址引用。
@@ -646,6 +646,86 @@ static int initr_malloc(void)
 	return 0;
 }
 ```
+
+# common/main.c
+```c
+/* We come here after U-Boot is initialised and ready to process commands */
+void main_loop(void)
+{
+	const char *s;
+
+	bootstage_mark_name(BOOTSTAGE_ID_MAIN_LOOP, "main_loop");
+
+	cli_init();
+
+	s = bootdelay_process();	//获取启动延迟时间 
+	//从FDT中获取命令行参数
+	if (cli_process_fdt(&s))
+		cli_secure_boot_cmd(s);
+	//自动启动命令
+	autoboot_command(s);
+	//命令行循环
+	cli_loop();
+
+	panic("No CLI available");
+}
+```
+
+## common/autoboot.c
+### autoboot_command 自动启动命令
+```c
+void autoboot_command(const char *s)
+{
+	debug("### main_loop: bootcmd=\"%s\"\n", s ? s : "<UNDEFINED>");
+
+	if (s && (stored_bootdelay == -2 ||
+		 (stored_bootdelay != -1 && !abortboot(stored_bootdelay)))) {
+		bool lock;
+		int prev;
+
+		lock = autoboot_keyed() &&
+			!IS_ENABLED(CONFIG_AUTOBOOT_KEYED_CTRLC);
+		if (lock)
+			prev = disable_ctrlc(1); /* disable Ctrl-C checking */
+
+		run_command_list(s, -1, 0);
+
+		if (lock)
+			disable_ctrlc(prev);	/* restore Ctrl-C checking */
+	}
+
+	if (IS_ENABLED(CONFIG_AUTOBOOT_USE_MENUKEY) &&
+	    menukey == AUTOBOOT_MENUKEY) {
+		s = env_get("menucmd");
+		if (s)
+			run_command_list(s, -1, 0);
+	}
+}
+```
+
+### abortboot 检查是否有按键中断
+```c
+static int abortboot(int bootdelay)
+{
+	int abort = 0;
+
+	if (bootdelay >= 0) {
+		if (autoboot_keyed())
+			abort = abortboot_key_sequence(bootdelay);
+		else
+			abort = abortboot_single_key(bootdelay);
+	}
+
+	if (IS_ENABLED(CONFIG_SILENT_CONSOLE) && abort)
+		gd->flags &= ~GD_FLG_SILENT;
+
+	return abort;
+}
+```
+
+### passwd_abort_key
+
+
 
 # fdtdec 扁平设备树解析
 
@@ -1547,32 +1627,11 @@ int jumptable_init(void)
 }
 ```
 
-## common/main.c
-```c
-/* We come here after U-Boot is initialised and ready to process commands */
-void main_loop(void)
-{
-	const char *s;
 
-	bootstage_mark_name(BOOTSTAGE_ID_MAIN_LOOP, "main_loop");
-
-	cli_init();
-
-	s = bootdelay_process();	//获取启动延迟时间 
-	//从FDT中获取命令行参数
-	if (cli_process_fdt(&s))
-		cli_secure_boot_cmd(s);
-	//自动启动命令
-	autoboot_command(s);
-	//命令行循环
-	cli_loop();
-
-	panic("No CLI available");
-}
-```
 
 ## common/cli.c
 ### cli_init
+- u_boot_hush_start();
 
 # include
 
