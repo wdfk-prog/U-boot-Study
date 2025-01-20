@@ -661,6 +661,8 @@ void main_loop(void)
 	s = bootdelay_process();	//获取启动延迟时间 
 	//从FDT中获取命令行参数
 	if (cli_process_fdt(&s))
+		//设置了bootsecure执行;
+		//不使用命令行,避免被攻击
 		cli_secure_boot_cmd(s);
 	//自动启动命令
 	autoboot_command(s);
@@ -671,14 +673,110 @@ void main_loop(void)
 }
 ```
 
-## common/autoboot.c
+# common/cli.c
+## cli_init
+- u_boot_hush_start();
+```c
+int u_boot_hush_start(void)
+{
+	if (top_vars == NULL) {
+		top_vars = malloc(sizeof(struct variables));
+		top_vars->name = "HUSH_VERSION";
+		top_vars->value = "0.01";
+		top_vars->next = NULL;
+		top_vars->flg_export = 0;
+		top_vars->flg_read_only = 1;
+	}
+	return 0;
+}
+```
+
+## cli_process_fdt 从FDT中获取命令行参数
+- 获取`bootcmd`和`bootsecure`参数
+- configs/stm32h750-art-pi_defconfig
+	```c
+	CONFIG_BOOTCOMMAND="bootm 90080000"
+	```
+- include/env_default.h
+	```c
+	#ifdef	CONFIG_BOOTCOMMAND
+		"bootcmd="	CONFIG_BOOTCOMMAND		"\0"
+	#endif
+	```
+- cli_process_fdt
+	```c
+	bool cli_process_fdt(const char **cmdp)
+	{
+		/* Allow the fdt to override the boot command */
+		const char *env = ofnode_conf_read_str("bootcmd");
+		if (env)
+			*cmdp = env;
+		/*
+		* If the bootsecure option was chosen, use secure_boot_cmd().
+		* Always use 'env' in this case, since bootsecure requres that the
+		* bootcmd was specified in the FDT too.
+		*/
+		return ofnode_conf_read_int("bootsecure", 0);
+	}
+	```
+
+## run_command_list
+- 以cli_simple_run_command_list进行分析
+### cli_simple_run_command_list
+- include/env_default.h
+	```c
+	#define CONFIG_BOOTCOMMAND "bootm 90080000"
+	"bootcmd="	CONFIG_BOOTCOMMAND		"\0"
+	```
+- cli_simple_run_command_list
+```c
+int cli_simple_run_command_list(char *cmd, int flag)
+{
+	char *line, *next;
+	int rcode = 0;
+
+	/*
+	 * Break into individual lines, and execute each line; terminate on
+	 * error.
+	 */
+	next = cmd;
+	line = cmd;
+	//执行多条命令,以\n分隔
+	while (*next) {
+		if (*next == '\n') {
+			*next = '\0';
+			/* run only non-empty commands */
+			if (*line) {
+				debug("** exec: \"%s\"\n", line);
+				if (cli_simple_run_command(line, 0) < 0) {
+					rcode = 1;
+					break;
+				}
+			}
+			line = next + 1;
+		}
+		++next;
+	}
+	//执行最后一条命令或者唯一一条命令
+	if (rcode == 0 && *line)
+		rcode = (cli_simple_run_command(line, 0) < 0);
+
+	return rcode;
+}
+```
+### cli_simple_run_command
+
+
+# common/autoboot.c
 ### autoboot_command 自动启动命令
 ```c
 void autoboot_command(const char *s)
 {
 	debug("### main_loop: bootcmd=\"%s\"\n", s ? s : "<UNDEFINED>");
 
-	if (s && (stored_bootdelay == -2 ||
+	if (s //有bootcmd
+	&& (stored_bootdelay == -2 ||
+		//有延迟时间,且没有按键中断
 		 (stored_bootdelay != -1 && !abortboot(stored_bootdelay)))) {
 		bool lock;
 		int prev;
@@ -724,8 +822,66 @@ static int abortboot(int bootdelay)
 ```
 
 ### passwd_abort_key
+- 输入`bootdelaykey`或者`bootstopkey`中的任意一个按键,则返回1
+```c
+static int passwd_abort_key(uint64_t etime)
+{
+	int abort = 0;
+	struct {
+		char *str;
+		u_int len;
+		int retry;
+	}
+	delaykey[] = {
+		{ .str = env_get("bootdelaykey"),  .retry = 1 },
+		{ .str = env_get("bootstopkey"),   .retry = 0 },
+	};
+
+	char presskey[DELAY_STOP_STR_MAX_LENGTH];
+	//需要匹配的输入字符串,env中没有配置则宏定义的字符串
+#  ifdef CONFIG_AUTOBOOT_DELAY_STR
+	if (delaykey[0].str == NULL)
+		delaykey[0].str = CONFIG_AUTOBOOT_DELAY_STR;
+#  endif
+#  ifdef CONFIG_AUTOBOOT_STOP_STR
+	if (delaykey[1].str == NULL)
+		delaykey[1].str = CONFIG_AUTOBOOT_STOP_STR;
+#  endif
+
+	do {
+		//检查是否有按键输入
+		if (tstc()) {
+		}
+		//获取按键输入并进行匹配
+		for (i = 0; i < sizeof(delaykey) / sizeof(delaykey[0]); i++) {
+			if (delaykey[i].len > 0 &&
+			    presskey_len >= delaykey[i].len &&
+				memcmp(presskey + presskey_len -
+					delaykey[i].len, delaykey[i].str,
+					delaykey[i].len) == 0) {
+					debug_bootkeys("got %skey\n",
+						delaykey[i].retry ? "delay" :
+						"stop");
+
+				/* don't retry auto boot */
+				if (!delaykey[i].retry)
+					bootretry_dont_retry();
+				abort = 1;
+			}
+		}
+		udelay(10000);
+	} while (!abort && get_ticks() <= etime);
+
+	return abort;
+}
+```
+
+### abortboot_single_key
+- 获取任意输入,就终止
 
 
+# cmd/bootm.c 从内存中的映像引导应用程序映像
+## do_bootm
 
 # fdtdec 扁平设备树解析
 
@@ -1626,12 +1782,6 @@ int jumptable_init(void)
 	return 0;
 }
 ```
-
-
-
-## common/cli.c
-### cli_init
-- u_boot_hush_start();
 
 # include
 
