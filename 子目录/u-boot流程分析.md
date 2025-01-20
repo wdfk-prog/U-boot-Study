@@ -545,7 +545,7 @@ relocate_done:
 ENDPROC(relocate_code)
 ```
 
-# common/board_r.c	暂缓分析***
+# common/board_r.c	正在分析***
 
 - r 通常表示 "relocation"（重定位)
 - 在 U-Boot 启动过程中，重定位是一个关键步骤，它将 U-Boot 从加载地址移动到运行地址，并修正所有相关的地址引用。
@@ -564,25 +564,86 @@ void board_init_r(gd_t *new_gd, ulong dest_addr)
 	 */
 	gd->flags &= ~(GD_FLG_SERIAL_READY | GD_FLG_LOG_READY);
 
-	/*
-	 * Set up the new global data pointer. So far only x86 does this
-	 * here.
-	 * TODO(sjg@chromium.org): Consider doing this for all archs, or
-	 * dropping the new_gd parameter.
-	 */
-	if (CONFIG_IS_ENABLED(X86_64) && !IS_ENABLED(CONFIG_EFI_APP))
-		arch_setup_gd(new_gd);
-
-#if !defined(CONFIG_X86) && !defined(CONFIG_ARM) && !defined(CONFIG_ARM64)
-	gd = new_gd;
-#endif
 	gd->flags &= ~GD_FLG_LOG_READY;
 
 	if (initcall_run_list(init_sequence_r))
 		hang();
 
-	/* NOTREACHED - run_main_loop() does not return */
+	// 应该执行到app中了,如果执行到这里,说明初始化失败
 	hang();
+}
+```
+
+## init_sequence_r 板级初始化调用列表
+
+```c
+static init_fnc_t init_sequence_r[] = {
+	initr_trace,
+	initr_reloc,	//gd->flags |= GD_FLG_RELOC | GD_FLG_FULL_MALLOC_INIT;
+	event_init,
+#if defined(CONFIG_ARM) || defined(CONFIG_RISCV)
+	initr_caches,	//arch/arm/cpu/armv7m/cache.c
+#endif
+	initr_reloc_global_data,
+	initr_malloc,
+	log_init,
+	initr_bootstage,	/* Needs malloc() but has its own timer */
+	initr_dm,
+#if defined(CONFIG_ARM) || defined(CONFIG_RISCV) || defined(CONFIG_SANDBOX)
+	board_init,	/* Setup chipselects */
+#endif
+	initr_lmb,	//初始化逻辑内存块
+	initr_dm_devices,
+	serial_initialize,
+	initr_announce,	//打印u-boot重定向地址
+	dm_announce,	//打印设备管理版本
+#ifdef CONFIG_MMC
+	initr_mmc,
+#endif
+	initr_env,
+	stdio_add_devices,
+	jumptable_init,
+	console_init_r,		/* fully init console as a device */
+	interrupt_init,
+	run_main_loop,
+}
+```
+
+### initr_reloc_global_data
+```c
+static int initr_reloc_global_data(void)
+{
+#ifdef __ARM__
+	//board_f.c 中 gd->mon_len = (ulong)__bss_end - (ulong)_start;
+	//差别在与是__bss_end还是__end,一个是bss段的结束地址,一个是代码段的结束地址
+	monitor_flash_len = _end - __image_copy_start;
+#endif
+#ifdef CONFIG_SYS_RELOC_GD_ENV_ADDR
+	 //env/env.c gd->env_addr = (ulong)&default_environment[0];
+	gd->env_addr += gd->reloc_off;
+#endif
+}
+```
+
+### initr_malloc
+- initf_malloc中初始化了malloc,在board_f中malloc将会增加malloc_ptr的值,而早期初始化的malloc大小为SYS_MALLOC_F_LEN,已经预留了
+```c
+static int initr_malloc(void)
+{
+	ulong start;
+
+#if CONFIG_IS_ENABLED(SYS_MALLOC_F)
+	debug("Pre-reloc malloc() used %#x bytes (%d KB)\n", gd->malloc_ptr,
+	      gd->malloc_ptr / 1024);
+#endif
+	/* The malloc area is immediately below the monitor copy in DRAM */
+	/*
+	 * This value MUST match the value of gd->start_addr_sp in board_f.c:
+	 * reserve_noncached().
+	 */
+	start = gd->relocaddr - TOTAL_MALLOC_LEN;
+	mem_malloc_init(start, TOTAL_MALLOC_LEN);
+	return 0;
 }
 ```
 
@@ -1432,6 +1493,87 @@ dlmalloc 使用最佳适配或首次适配策略来找到合适的空闲块：
 7. 内存对齐（Memory Alignment）
 dlmalloc 确保分配的内存块是对齐的，以满足特定硬件或数据结构的要求。这通常通过调整块的起始地址来实现。
 
+### mem_malloc_init
+```c
+ulong mem_malloc_start = 0;
+ulong mem_malloc_end = 0;
+ulong mem_malloc_brk = 0;
+
+void mem_malloc_init(ulong start, ulong size)
+{
+	mem_malloc_start = (ulong)map_sysmem(start, size);
+	mem_malloc_end = mem_malloc_start + size;
+	mem_malloc_brk = mem_malloc_start;
+
+#ifdef CONFIG_SYS_MALLOC_DEFAULT_TO_INIT
+	malloc_init();
+#endif
+
+	debug("using memory %#lx-%#lx for malloc()\n", mem_malloc_start,
+	      mem_malloc_end);
+#if CONFIG_IS_ENABLED(SYS_MALLOC_CLEAR_ON_INIT)
+	memset((void *)mem_malloc_start, 0x0, size);
+#endif
+}
+```
+
+## common/exports.c
+### jumptable_init
+- malloc分配jt_funcs结构体,并将函数指针赋值给jt_funcs结构体
+- jt_funcs结构体中的函数指针是在_exports.h中定义的
+- 这些函数在u-boot中是代码段中的函数,在u-boot中是通过函数指针调用的
+- jt跳转表包含指向导出函数的指针。指向跳转表将传递给独立应用程序。
+```c
+EXPORT_FUNC(get_version, unsigned long, get_version, void)
+EXPORT_FUNC(getchar, int, getc, void)
+EXPORT_FUNC(tstc, int, tstc, void)
+EXPORT_FUNC(putc, void, putc, const char)
+EXPORT_FUNC(puts, void, puts, const char *)
+
+struct jt_funcs {
+#define EXPORT_FUNC(impl, res, func, ...) res(*func)(__VA_ARGS__);
+#include <_exports.h>
+#undef EXPORT_FUNC
+};
+
+#define EXPORT_FUNC(f, a, x, ...)  gd->jt->x = f;
+
+int jumptable_init(void)
+{
+	gd->jt = malloc(sizeof(struct jt_funcs));
+#include <_exports.h>
+
+	return 0;
+}
+```
+
+## common/main.c
+```c
+/* We come here after U-Boot is initialised and ready to process commands */
+void main_loop(void)
+{
+	const char *s;
+
+	bootstage_mark_name(BOOTSTAGE_ID_MAIN_LOOP, "main_loop");
+
+	cli_init();
+
+	s = bootdelay_process();	//获取启动延迟时间 
+	//从FDT中获取命令行参数
+	if (cli_process_fdt(&s))
+		cli_secure_boot_cmd(s);
+	//自动启动命令
+	autoboot_command(s);
+	//命令行循环
+	cli_loop();
+
+	panic("No CLI available");
+}
+```
+
+## common/cli.c
+### cli_init
+
 # include
 
 ## arch/arm/include/asm
@@ -1770,6 +1912,7 @@ void mpu_config(struct mpu_region_config *reg_config)
 	       , &V7M_MPU->rasr);
 }
 ```
+
 ### arch/arm/include/asm/armv7_mpu.h
 - 内存保护单元 (MPU) 将内存映射划分为多个区域，并定义每个区域的位置、大小、访问权限和内存属性。它支持：
 	- 每个区域都有独立的属性设置。 
@@ -1818,6 +1961,135 @@ enum xn {
 	XN_DIS = 0,	//启用指令提取
 	XN_EN,		//禁用指令提取
 };
+```
+
+## arch/arm/cpu/armv7m/cache.c
+在 ARM 架构中，PoU（Point of Unification）和 PoC（Point of Coherency）是两个与缓存一致性相关的重要概念。它们用于描述缓存操作的范围和影响。
+
+1. PoU（Point of Unification）
+PoU 是指统一点，表示指令和数据缓存的统一点。在这个点上，指令缓存和数据缓存的内容是一致的。通常，PoU 是指缓存层次结构中的某个级别，在这个级别上，指令和数据缓存的内容可以被视为统一的。
+
+- 作用
+	- 指令和数据缓存一致性：确保在 PoU 处，指令缓存和数据缓存的内容是一致的。
+	- 缓存操作的范围：缓存操作（如清除、无效化）在 PoU 处生效，确保指令和数据缓存的一致性。
+2. PoC（Point of Coherency）
+PoC 是指一致性点，表示缓存和主存之间的一致性点。在这个点上，所有处理器和 DMA 设备都可以看到一致的内存视图。通常，PoC 是指缓存层次结构中的某个级别，在这个级别上，缓存和主存的内容是一致的。
+
+- 作用
+	- 缓存和主存一致性：确保在 PoC 处，缓存和主存的内容是一致的。
+	- 缓存操作的范围：缓存操作（如清除、无效化）在 PoC 处生效，确保缓存和主存的一致性。
+
+3. 使能缓存的步骤
+	- 清除和无效化缓存： 在使能缓存之前，通常需要清除和无效化缓存，以确保缓存中的数据是一致的。这可以防止缓存中的旧数据影响系统的正常运行。
+
+	- 配置缓存属性： 配置缓存的属性，如缓存策略（写回或直写）、缓存大小、缓存行大小等。这些属性决定了缓存的工作方式和性能。
+
+	- 使能缓存： 最后，通过设置特定的控制寄存器，使能指令缓存和数据缓存。
+```c
+/* PoU ： 统一点， Poc： 连贯点 */
+/*
+ * PoU 的缓存维护操作可用于同步 Cortex®-M7 数据和指令缓存之间的数据，例如当软件使用自修改代码时。
+ * PoC 的缓存维护操作可用于在 Cortex®-M7 数据缓存和外部代理（如系统 DMA）之间同步数据。
+*/
+enum cache_action {
+	INVALIDATE_POU,			/* 指令缓存使所有到统一点 (PoU) 的指令无效*/
+	INVALIDATE_POC,			/* 数据缓存通过地址到一致点（PoC）失效*/
+	INVALIDATE_SET_WAY,		/* 数据缓存通过 set/way 失效 */
+	FLUSH_POU,				/* 按地址将数据缓存至 PoU*/
+	FLUSH_POC,				/* 通过地址清理数据缓存到PoC*/
+	FLUSH_SET_WAY,			/* 按设置/方式清理数据缓存 */
+	FLUSH_INVAL_POC,		/* 数据缓存清理并按地址失效至 PoC */
+	FLUSH_INVAL_SET_WAY,	/* 通过 set/way 清理数据缓存并使之无效 */
+};
+
+static u32 *get_action_reg_set_ways(enum cache_action action)
+{
+	switch (action) {
+	case INVALIDATE_SET_WAY:
+		return V7M_CACHE_REG_DCISW;
+	case FLUSH_SET_WAY:
+		return V7M_CACHE_REG_DCCSW;
+	case FLUSH_INVAL_SET_WAY:
+		return V7M_CACHE_REG_DCCISW;
+	default:
+		break;
+	};
+
+	return NULL;
+}
+
+static u32 *get_action_reg_range(enum cache_action action)
+{
+	switch (action) {
+	case INVALIDATE_POU:
+		return V7M_CACHE_REG_ICIMVALU;
+	case INVALIDATE_POC:
+		return V7M_CACHE_REG_DCIMVAC;
+	case FLUSH_POU:
+		return V7M_CACHE_REG_DCCMVAU;
+	case FLUSH_POC:
+		return V7M_CACHE_REG_DCCMVAC;
+	case FLUSH_INVAL_POC:
+		return V7M_CACHE_REG_DCCIMVAC;
+	default:
+		break;
+	}
+
+	return NULL;
+}
+
+static void get_cache_ways_sets(struct dcache_config *cache)
+{
+	//标识当前由CSSELR选择的缓存的配置
+	u32 cache_size_id = readl(V7M_PROC_REG_CCSIDR);
+	//路径数：（路径数）- 1
+	cache->ways = (cache_size_id & MASK_NUM_WAYS) >> NUM_WAYS_SHIFT;
+	//表示集合的个数为：(number of sets) - 1。
+	cache->sets = (cache_size_id & MASK_NUM_SETS) >> NUM_SETS_SHIFT;
+}
+
+static int action_dcache_all(enum cache_action action)
+{
+	struct dcache_config cache;
+	u32 *action_reg;
+	int i, j;
+
+	action_reg = get_action_reg_set_ways(action);
+	if (!action_reg)
+		return -EINVAL;
+	//V7M_PROC_REG_CSSELR 缓存大小选择寄存器 
+	//SEL_I_OR_D 允许选择指令或数据缓存 0：表示数据缓存 1：表示指令缓存
+	clrbits_le32(V7M_PROC_REG_CSSELR, BIT(SEL_I_OR_D));
+	/* Make sure cache selection is effective for next memory access */
+	dsb();
+
+	get_cache_ways_sets(&cache);	/* Get number of ways & sets */
+	debug("cache: ways= %d, sets= %d\n", cache.ways + 1, cache.sets + 1);
+	for (i = cache.sets; i >= 0; i--) {
+		for (j = cache.ways; j >= 0; j--) {
+			writel((j << WAYS_SHIFT) 	//设置操作应用的/索引。缓存中的索引数取决于配置的缓存大小。当该值小于最大值时，使用该字段的LSB。缓存中的集合数量可以通过读取第219页的缓存大小ID寄存器来确定
+			| (i << SETS_SHIFT),		//这个操作适用于。对于数据缓存，取值为0、1、2和3。
+			       action_reg);
+		}
+	}
+
+	/* Make sure cache action is effective for next memory access */
+	dsb();
+	isb();	/* Make sure instruction stream sees it */
+
+	return 0;
+}
+
+
+void enable_caches(void)
+{
+#if !CONFIG_IS_ENABLED(SYS_ICACHE_OFF)
+	icache_enable();
+#endif
+#if !CONFIG_IS_ENABLED(SYS_DCACHE_OFF)
+	dcache_enable();
+#endif
+}
 ```
 
 ## include/asm
