@@ -377,9 +377,6 @@ kefile
 - [流程参考](./子目录/UBOOT编译---%20make%20xxx_deconfig过程详解(一)%20-%20BSP-路人甲%20-%20博客园.mhtml)
 
 ### Ubootb编译第一步通常是执行make xxx_config
-
-
-
 - 在编译指定顶层目录生成.c onfig文件，这种方式要求厂商 提供一个基础的xxx_config文件(通常来说开发者不会通过执行make menuconfig从零开始配置，这个工作过量太大了)。
 
 - 查看编译流程时,优先查看 `xxx:`这类可执行目标;如果make 没有带目标时,则优先查看第一个目标,因为是执行的这个目标;从头开始查看,需要注意查看 `include`是否引入的 `xxx:`
@@ -392,7 +389,6 @@ kefile
 %config: scripts_basic outputmakefile FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
 ```
-
 
 - %config 还会依赖于 `scripts_basic`和 `outputmakefile`，`FORCE`是一个空目标，用于强制执行规则。
 
@@ -427,9 +423,7 @@ build := -f $(srctree)/scripts/Makefile.build obj
 
 #### outputmakefile 生成Makefile
 
-#### 执行scripts/kconfi
-g Makefile
-
+#### 执行scripts/kconfig Makefile
 
 #### 编译生成conf
 
@@ -493,81 +487,47 @@ objdump -d start.o
 - [u-boot流程分析](./子目录/u-boot流程分析.md)
 
 # U-BOOT 配置
-## 设置编译引导加载程序
-### VPL（Very Early Program Loader）
 
-* **功能** ：VPL 是 U-Boot 的非常早期引导加载程序，通常用于在极其受限的环境中进行最基本的硬件初始化。
-* **位置** ：VPL 通常位于存储设备的固定位置，类似于 SPL 和 TPL。
-* **作用** ：VPL 的主要任务是加载并执行 TPL，以便进一步初始化系统并准备加载 SPL。
+- [u-boot配置](./子目录/u-boot%20config.md)
 
-### SPL（Secondary Program Loader）
+# U-boot 分类
 
-* **功能** ：SPL 是 U-Boot 的第二阶段引导加载程序，通常用于初始化基本的硬件资源，如内存控制器、时钟和电源管理等。
-* **位置** ：SPL 通常位于存储设备的固定位置，如 NAND、NOR 闪存或 SD 卡的特定扇区。
-* **作用** ：SPL 的主要任务是加载并执行 U-Boot 的主引导加载程序（即 U-Boot 本身），以便进一步初始化系统并启动操作系统。
+## arch
+- [arm](./u-boot分类/arch/arm.md)
 
-### TPL（Tertiary Program Loader）
+## boot
+- [bootm](./u-boot分类/boot/bootm.md)
+- [image](./u-boot分类/boot/image.md)
 
-* **功能** ：TPL 是 U-Boot 的第三阶段引导加载程序，通常用于在资源受限的环境中进一步初始化硬件资源。
-* **位置** ：TPL 通常位于存储设备的固定位置，类似于 SPL。
-* **作用** ：TPL 的主要任务是加载并执行 SPL，以便进一步初始化系统并准备加载 U-Boot 主引导加载程序。
+## cmd
 
-## 设置系统栈指针地址与长度
-```c
-CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
-CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x24040000
-CONFIG_ENV_SIZE=0x2000
+## common
+- [autoboot](./u-boot分类/common/autoboot.md)
+- [board](./u-boot分类/common/board.md)
+- [cli](./u-boot分类/common/cli.md)
+- [command](./u-boot分类/common/command.md)
+- [console](./u-boot分类/common/console.md)
+- [dmalloc](./u-boot分类/common/dmalloc.md)
+- [event](./u-boot分类/common/event.md)
+- [export](./u-boot分类/common/export.md)
+- [log](./u-boot分类/common/log.md)
+- [main](./u-boot分类/common/main.md)
 
-#define CONFIG_SYS_MALLOC_F 1
-#define CONFIG_SYS_MALLOC_F_LEN 0x2000
-#define CONFIG_CUSTOM_SYS_INIT_SP_ADDR 0x24040000
-```
+## dm
+- [core](./u-boot分类/dm/core.md)
+- [serial](./u-boot分类/dm/serial.md)
 
-## 事件功能 CONFIG_EVENT
-### EVENT_DEBUG
-### EVENT_DYNAMIC
+## env
+- [env](./u-boot分类/env/env.md)
 
-## printf功能
-```c
-CONFIG_SYS_PBSIZE=282
+## fdt
+- [fdt](./u-boot分类/fdt/fdt.md)
 
-#define CONFIG_PRINTF 1
-#define CONFIG_SYS_PBSIZE 282
-```
+## include
+- [kconfig](./u-boot分类/include/kconfig.md)
+- [linker_list](./u-boot分类/include/linker_list.md)
+- [杂项](./u-boot分类/include/杂项.md)
 
-## 日志功能
-```c
-CONFIG_LOG=y
-CONFIG_LOG_ERROR_RETURN=y
-```
+## lib
+- [lib](./u-boot分类/lib/lib.md)
 
-## 设备树
-```c
-CONFIG_OF_CONTROL=y
-```
-### OFNODE_MULTI_TREE 多设备树
-
-### CONFIG_BLOBLIST 二进制设备树
-
-### CONFIG_OF_LIVE 动态设备树
-
-### CONFIG_OF_REAL 设备树
-
-### CONFIG_OF_PLATDATA_INST 
-
-### OF_PLATDATA_DRIVER_RT 
-
-### OF_PLATDATA_RT 
-
-### DM_SEQ_ALIAS  设备别名
-
-## LIBCOMMON_SUPPORT 通用库支持
-
-## CONFIG_TRACE_EARLY 提前跟踪
-
-## CONFIG_DM_EVENT 驱动事件支持
-
-## CONFIG_SYSINFO 系统信息
-
-## CONFIG_MACH_TYPE
-- 机器类型是一个唯一的标识符，用于区分不同的硬件平台。每个硬件平台都有一个唯一的机器类型编号，这个编号在 U-Boot 和 Linux 内核中用于识别和初始化特定的硬件平台。

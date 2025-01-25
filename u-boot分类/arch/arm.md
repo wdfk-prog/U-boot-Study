@@ -1,0 +1,621 @@
+[TOC]
+
+# lds链接脚本 定义入口函数
+
+- 链接脚本定义了ENTRY(_start),即开始入口为_start
+
+```lds
+OUTPUT_FORMAT("elf32-littlearm", "elf32-littlearm", "elf32-littlearm")
+OUTPUT_ARCH(arm)
+ENTRY(_start)
+```
+
+# include/asm
+
+## assembler.h
+
+- 定义了一些宏,用ret开头,用于返回
+
+```asm
+/*
+* Use 'bx lr' everywhere except ARMv4 (without 'T') where only 'mov pc, lr'
+* works
+*/
+    .irp	c,,eq,ne,cs,cc,mi,pl,vs,vc,hi,ls,ge,lt,gt,le,hs,lo
+    .macro	ret\c, reg
+
+    /* ARMv4- don't know bx lr but the assembler fails to see that */
+#ifdef __ARM_ARCH_4__
+    mov\c	pc, \reg
+#else
+    .ifeqs	"\reg", "lr"
+    bx\c	\reg
+    .else
+    mov\c	pc, \reg
+    .endif
+#endif
+    .endm
+    .endr
+```
+
+- .irp .endr 会展开生成循环中的代码,展开后如下:
+
+```asm
+.macro	ret, reg
+#ifdef __ARM_ARCH_4__
+    mov	pc, \reg
+#else
+    .ifeqs	"\reg", "lr"
+    bx	\reg
+    .else
+    mov	pc, \reg
+    .endif
+#endif
+.endm
+
+.macro	ret_eq, reg
+#ifdef __ARM_ARCH_4__
+    moveq	pc, \reg
+#else
+    .ifeqs	"\reg", "lr"
+    bxeq	\reg
+    .else
+    moveq	pc, \reg
+    .endif
+#endif
+.endm
+// 等等不列举
+```
+
+## unified.h
+
+- W(instr) 的定义展开为 `instr.w`
+
+```asm
+#ifdef CONFIG_THUMB2_KERNEL //在include/generated/autoconf.h中定义
+#ifdef __ASSEMBLY__         //在makefile脚本中定义
+#define W(instr)	instr.w
+#else
+#define WASM(instr)	#instr ".w"
+#endif
+```
+
+## io.h
+### write
+1. 定义局部变量：首先，定义了一个局部变量 __v，类型为 u32（无符号 32 位整数），并将传入的值 v 赋值给 __v。这样做的目的是确保值 v 在后续操作中不会被修改。
+2. 内存屏障：调用 __iowmb() 函数，这是一个内存屏障函数，用于确保所有之前的内存写操作在执行后续的 I/O 操作之前完成。内存屏障在多核处理器和复杂的内存系统中非常重要，以确保内存操作的顺序性
+3. 写入寄存器：调用 __arch_putl(__v, c) 函数，将值 __v 写入到地址 c 所指向的寄存器中。__arch_putl 是一个架构相关的函数，用于执行实际的写操作。
+
+- 在这段代码中，__iowmb() 使用的是 dmb（数据内存屏障）而不是 dsb（数据同步屏障），主要原因是 dmb 足以确保内存访问的顺序性，而不需要 dsb 提供的更严格的同步保证。
+	- 原因分析：
+	- 内存访问顺序： dmb 确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。这对于确保写操作的顺序性已经足够。例如，在写入寄存器之前，确保所有之前的内存写操作已经完成。
+	- 性能考虑： dsb 是一种更严格的屏障指令，不仅影响内存访问，还会影响所有类型的指令执行顺序。使用 dsb 会导致更大的性能开销，因为它会强制处理器等待所有之前的指令完成，并刷新所有的缓存和写缓冲区。对于大多数内存写操作来说，这种严格的同步保证通常是不必要的。
+	- 适用场景： 在大多数情况下，内存写操作只需要确保内存访问的顺序性，而不需要确保所有类型的指令执行顺序。因此，使用 dmb 可以提供足够的保证，同时避免 dsb 带来的性能开销。
+
+- DSB的使用场景
+	1. 系统控制寄存器的修改
+	2. 关键的同步操作,例如，在实现自旋锁或其他同步原语时。
+	3. 缓存和写缓冲区的刷新
+	4. 处理器模式切换(如从用户模式切换到内核模式）时，需要确保所有之前的指令和内存操作都已完成。这时需要使用 DSB。
+```c
+/* Generic virtual read/write. */
+#define __arch_getb(a)			(*(volatile unsigned char *)(a))
+#define __arch_getw(a)			(*(volatile unsigned short *)(a))
+#define __arch_getl(a)			(*(volatile unsigned int *)(a))
+#define __arch_getq(a)			(*(volatile unsigned long long *)(a))
+
+#define __arch_putb(v,a)		(*(volatile unsigned char *)(a) = (v))
+#define __arch_putw(v,a)		(*(volatile unsigned short *)(a) = (v))
+#define __arch_putl(v,a)		(*(volatile unsigned int *)(a) = (v))
+#define __arch_putq(v,a)		(*(volatile unsigned long long *)(a) = (v))
+
+#define writeb(v,c)	({ u8  __v = v; __iowmb(); __arch_putb(__v,c); __v; })
+#define writew(v,c)	({ u16 __v = v; __iowmb(); __arch_putw(__v,c); __v; })
+#define writel(v,c)	({ u32 __v = v; __iowmb(); __arch_putl(__v,c); __v; })
+#define writeq(v,c)	({ u64 __v = v; __iowmb(); __arch_putq(__v,c); __v; })
+```
+
+### __iowmb 内存屏障
+- DSB（数据同步屏障）和 DMB（数据内存屏障）都是用于控制内存访问顺序的屏障指令，但它们在具体的行为和应用场景上有所不同。
+- DSB 是一种更严格的屏障指令，用于确保在其之前的所有内存访问操作（包括读和写）在其之后的内存访问操作之前完成。它不仅影响内存访问，还会影响所有类型的指令执行顺序。DSB 确保所有之前的指令都已完成，并且所有的缓存和写缓冲区都已刷新。
+- DMB 是一种较为宽松的屏障指令，用于确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。与 DSB 不同，DMB 只影响内存访问的顺序，不影响其他类型的指令执行顺序。DMB 确保内存访问的顺序性，但不强制刷新缓存或写缓冲区。
+
+```c
+#define ISB	asm volatile ("isb sy" : : : "memory")	//ISB（指令同步屏障）用于确保在其之前的所有指令在其之后的指令执行之前完成。
+#define DSB	asm volatile ("dsb sy" : : : "memory")	//DSB（数据同步屏障）用于确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。
+#define DMB	asm volatile ("dmb sy" : : : "memory")	//DMB（数据内存屏障）用于确保在其之前的所有内存访问操作在其之后的内存访问操作之前完成。
+
+// 在修改系统控制寄存器（如 MPU 配置）后，确保所有更改生效。在执行关键的同步操作时，确保所有之前的内存操作都已完成。
+#define mb()		dsb()
+#define rmb()		dsb()
+#define wmb()		dsb()
+
+// 在多核处理器中，确保一个核心的内存写操作在另一个核心的内存读操作之前完成。在共享内存的多线程程序中，确保内存操作的顺序性。
+#define __iormb()	dmb()
+#define __iowmb()	dmb()
+```
+
+# lib
+
+## vectors_m.S 设置中断向量表
+
+- 从这里开始执行,即_start,这段代码定义了中断向量表,并且定义了中断处理函数的入口
+
+```asm
+   .section  .vectors
+ENTRY(_start)
+	.long	SYS_INIT_SP_ADDR		@ 0 - 定义了复位时的堆栈指针地址
+	.long	reset				    @ 1 - 复位处理程序的地址
+	.long	__invalid_entry			@ 2 - 非屏蔽中断（NMI）的处理程序地址
+	.long	__hard_fault_entry		@ 3 - HardFault
+	.long	__mm_fault_entry		@ 4 - MemManage
+	.long	__bus_fault_entry		@ 5 - BusFault
+	.long	__usage_fault_entry		@ 6 - UsageFault
+	.long	__invalid_entry			@ 7 - Reserved
+	.long	__invalid_entry			@ 8 - Reserved
+	.long	__invalid_entry			@ 9 - Reserved
+	.long	__invalid_entry			@ 10 - Reserved
+	.long	__invalid_entry			@ 11 - SVCall
+	.long	__invalid_entry			@ 12 - Debug Monitor
+	.long	__invalid_entry			@ 13 - Reserved
+	.long	__invalid_entry			@ 14 - PendSV
+	.long	__invalid_entry			@ 15 - SysTick
+	.rept	255 - 16                @ 用于重复定义从 16 到 255 的外部中断处理程序地址
+	.long	__invalid_entry			@ 16..255 - External Interrupts
+	.endr
+```
+
+- 反汇编显示,其中 `.word	0x24040000`即为 `SYS_INIT_SP_ADDR`,即堆栈指针地址
+- 非循环指令一共16条,循环指令255 - 16 = 239条;一共255条,每条占用4字节,共1020字节(0x3fc)
+
+```map
+ *(.vectors)
+ .vectors       0x0000000090000000      0x3fc arch/arm/lib/vectors_m.o
+                0x0000000090000000                _start
+
+Contents of section .vectors:
+ 0000 00000424 00000000 00000000 00000000  ...$............
+    ---
+ 03f0 00000000 00000000 00000000           ............  
+
+Disassembly of section .vectors:
+
+00000000 <_start>:
+   0:	24040000 	.word	0x24040000
+	...
+
+```
+
+## crt0.S 定义了_main函数
+
+- 重新设置堆栈指针,并调用board_init_f_init_reserve初始化保留空间
+- ABI（应用二进制接口）是指应用程序与操作系统或其他程序之间的接口标准。ABI 规定了函数调用约定、系统调用约定、数据类型的大小和对齐方式等。遵循 ABI 标准可以确保不同编译器生成的代码能够相互兼容，并且能够正确地与操作系统或其他程序进行交互。
+- 在 ARM 架构中，函数调用时第一个参数通常通过寄存器 r0 传递
+
+```asm
+ENTRY(_main)
+/* 在初始化 C 运行时环境之前调用 arch_very_early_init。*/
+#if CONFIG_IS_ENABLED(ARCH_VERY_EARLY_INIT)	//没有定义不执行
+	bl	arch_very_early_init
+#endif
+/* 设置初始 C 运行环境并调用 board_init_f（0）*/
+#if defined(CONFIG_TPL_BUILD) && defined(CONFIG_TPL_NEEDS_SEPARATE_STACK)
+	ldr	r0, =(CONFIG_TPL_STACK)
+#elif defined(CONFIG_XPL_BUILD) && defined(CONFIG_SPL_STACK)
+	ldr	r0, =(CONFIG_SPL_STACK)
+#else
+	ldr	r0, =(SYS_INIT_SP_ADDR)	//没有定义则使用系统初始化的堆栈指针地址
+#endif
+	bic	r0, r0, #7	/* 符合 ABI 标准的 8 字节对齐 */
+	mov	sp, r0      /* 设置堆栈指针 */
+	bl	board_init_f_alloc_reserve	//跳转到进入,传入r0参数
+	mov	sp, r0		/* 重新设置堆栈指针,上述函数中重新设置了堆栈指针位置 */
+	/* 在此处设置 GD，不带任何 C 代码 */
+	mov	r9, r0
+	bl	board_init_f_init_reserve	/* gd->malloc_base 设置 */
+
+	mov	r0, #0
+	bl	board_init_f	/* 调用板级初始化,执行一系列的初始化函数;初始化失败则死循环 */
+#if ! defined(CONFIG_XPL_BUILD)
+
+/*
+ * 设置中间环境（新的 sp 和 gd）并调用 relocate_code（addr_moni）。这里的诀窍是我们将返回 “这里”但已搬迁。
+ */
+	ldr	r0, [r9, #GD_START_ADDR_SP]	/* sp = gd->start_addr_sp */
+	bic	r0, r0, #7	/* 8-byte alignment for ABI compliance */
+	mov	sp, r0
+	ldr	r9, [r9, #GD_NEW_GD]		/* r9 <- gd->new_gd */
+
+	adr	lr, here
+	ldr	r0, [r9, #GD_RELOC_OFF]		/* r0 = gd->reloc_off */
+	add	lr, lr, r0
+#if defined(CONFIG_CPU_V7M)
+	orr	lr, #1				/* As required by Thumb-only */
+#endif
+	ldr	r0, [r9, #GD_RELOCADDR]		/* r0 = gd->relocaddr */
+	b	relocate_code	/* 跳转到relocate_code,进行对relocaddr进行重新定位 */
+here:  
+	/*
+	* 现在重新定位向量表
+	*/
+	bl	relocate_vectors	// armv7m上,直接将向量表地址设置为relocaddr;V7M_SCB_VTOR = gd->relocaddr
+
+	/* 设置最终 （完整） 环境 */
+	bl	c_runtime_cpu_setup	// mov	pc, lr
+	/* 清零BSS段（未初始化数据段） */
+	CLEAR_BSS
+	/* call board_init_r(gd_t *id, ulong dest_addr) */
+	mov     r0, r9                  /* gd_t */
+	ldr	r1, [r9, #GD_RELOCADDR]	/* dest_addr */
+	/* call board_init_r */
+	ldr	pc, =board_init_r	/* this is auto-relocated! */
+	/* we should not return here. */
+#endif
+
+ENDPROC(_main)
+```
+
+## relocate.S
+
+- relocate_code 函数,用于重新定位代码
+- 在 U-Boot 启动过程中，重定位是一个关键步骤，它将 U-Boot 从加载地址移动到运行地址，并修正所有相关的地址引用。
+
+```c
+	ldr	r0, [r9, #GD_RELOCADDR]		/* r0 = gd->relocaddr */
+	b	relocate_code
+ENTRY(relocate_code)
+relocate_base:
+	adr	r3, relocate_base
+	/*为什么不用_image_copy_start直接计算呢?
+	目的是为了支持位置无关执行（PIE），使得 U-Boot 镜像可以在加载到不同的内存地址时正确运行。
+	这对于在不同内存位置加载和执行 U-Boot 镜像的场景非常重要，
+	例如在主要存储（如闪存）损坏时，从以太网或 UART 加载镜像进行恢复。*/
+	ldr	r1, _image_copy_start_ofs
+	add	r1, r3			/* r1 <- Run &__image_copy_start */
+	subs	r4, r0, r1		/* r4 <-Run to copy offset  = gd->relocaddr - &__image_copy_start*/
+    //r4 = &__image_copy_start - gd->relocaddr; //计算重新定位的偏移量
+	beq	relocate_done		/* 如果偏移量为0,跳过拷贝 */
+	ldr	r2, _image_copy_end_ofs
+	add	r2, r3			/* r2 <- Run &__image_copy_end   */
+
+copy_loop:
+	//使用ldmia 和 stmia 地址会自动增加
+	ldmia	r1!, {r10-r11}		/* 拷贝源地址 [r1] -> r10-r11 */
+	stmia	r0!, {r10-r11}		/* 存储10-r11到目的地址 [r0](gd->relocaddr) */
+	cmp	r1, r2			/* 一直循环到&__image_copy_end*/
+	//如果 r1 中的值小于 r2 中的值，则继续循环
+	blo	copy_loop
+
+	/*
+	 * fix .rel.dyn relocations
+	 */
+	ldr	r1, _rel_dyn_start_ofs
+	add	r2, r1, r3		/* r2 <- Run &__rel_dyn_start */
+	ldr	r1, _rel_dyn_end_ofs
+	add	r3, r1, r3		/* r3 <- Run &__rel_dyn_end */
+fixloop:
+	ldmia	r2!, {r0-r1}		/* (r0,r1) <- (SRC location,fixup) */
+	and	r1, r1, #0xff			//提取重定位类型
+	cmp	r1, #R_ARM_RELATIVE		//判断是否是相对重定位
+	bne	fixnext					//如果不是R_ARM_RELATIVE类型则进入下一个循环
+
+	/*相对修复：增加偏移量的位置*/
+	add	r0, r0, r4	//r0 = gd->relocaddr + Run to copy offset
+	ldr	r1, [r0]	//r1 = &r0
+	add	r1, r1, r4	//r1 = &r1+ Run to copy offset
+	str	r1, [r0]	//将r1的值存储到&gd->relocaddr
+fixnext:
+	cmp	r2, r3		//循环到&__rel_dyn_end
+	blo	fixloop
+
+relocate_done:
+	ret	lr  /* 返回到调用函数here + reloc_off处 */
+ENDPROC(relocate_code)
+```
+
+# cpu
+## armv7m
+- 参考[PM0253 Cortex®-M7 编程手册 P221](../学习芯片/ART-PI/PM0253%20Cortex®-M7%20编程手册.pdf)
+
+### start.S 定义了reset函数,跳转到_main
+
+- 使用objdump反汇编如下
+
+```map
+ arch/arm/cpu/armv7m/start.o(.text*)
+ .text          0x00000000900003fc        0x6 arch/arm/cpu/armv7m/start.o
+                0x00000000900003fc                reset
+                0x0000000090000400                c_runtime_cpu_setup
+
+Contents of section .text:
+ 0000 fff7febf f746                        .....F  
+Disassembly of section .text:
+
+00000000 <reset>:
+   0:	f7ff bffe 	b.w	0 <_main>   //跳转到_main
+
+00000004 <c_runtime_cpu_setup>:
+   4:	46f7      	mov	pc, lr  //从程序中返回
+```
+
+- .s包含了asm/assembler.h,该头文件包含了asm/unified.h;其中对W(instr)的定义展开为 `instr.w`
+- `mov	pc, lr`占用2字节,因为是thumb指令,Thumb 指令集是 ARM 处理器的一种压缩指令集，旨在减少代码大小，同时保持较高的性能。在 Thumb 指令集中，许多常用指令被编码为 16 位（2 字节）宽，而不是标准 ARM 指令集中的 32 位（4 字节）宽。这使得 Thumb 指令集在内存受限的嵌入式系统中非常有用。
+
+### mpu.c
+```c
+#define V7M_MPU_CTRL_ENABLE		BIT(0)			//使能MPU
+#define V7M_MPU_CTRL_DISABLE		(0 << 0)
+#define V7M_MPU_CTRL_HFNMIENA		BIT(1)		//在硬故障、NMI 和 FAULTMASK 处理程序期间启用 MPU 的操作。 
+#define V7M_MPU_CTRL_PRIVDEFENA		BIT(2)		//允许特权软件访问默认内存映射
+
+#define VALID_REGION			BIT(4)	//1：处理器：将 MPU_RNR 的值更新为 REGION 字段的值更新 REGION 字段中指定的区域的基地址。 始终读为零。
+
+void disable_mpu(void)
+{
+	writel(0, &V7M_MPU->ctrl);
+}
+
+void enable_mpu(void)
+{
+	writel(V7M_MPU_CTRL_ENABLE | V7M_MPU_CTRL_PRIVDEFENA, &V7M_MPU->ctrl);
+
+	/* Make sure new mpu config is effective for next memory access */
+	dsb();
+	isb();	/* Make sure instruction stream sees it */
+}
+
+void mpu_config(struct mpu_region_config *reg_config)
+{
+	uint32_t attr;
+
+	attr = get_attr_encoding(reg_config->mr_attr);
+	//写入配置的区域以及区域保护的内存开始地址
+	writel(reg_config->start_addr | VALID_REGION | reg_config->region_no,
+		   &V7M_MPU->rbar);
+	//写入配置的区域大小以及区域保护的内存属性
+	writel(reg_config->xn << XN_SHIFT | reg_config->ap << AP_SHIFT | attr
+		| reg_config->reg_size << REGION_SIZE_SHIFT | ENABLE_REGION
+		   , &V7M_MPU->rasr);
+}
+```
+
+### armv7_mpu.h
+- 内存保护单元 (MPU) 将内存映射划分为多个区域，并定义每个区域的位置、大小、访问权限和内存属性。它支持：
+	- 每个区域都有独立的属性设置。 
+	- 区域重叠。 
+	- 将内存属性导出到系统。
+- 内存属性会影响对区域的内存访问行为。
+	- Cortex®M7 MPU 定义：
+	- 8 个或 16 个单独的内存区域，0-7 或 0-15。
+	- 背景区域
+- 当内存区域重叠时，内存访问会受到编号最高的区域的属性的影响。例如，区域 7 的属性优先于与区域 7 重叠的任何区域的属性。
+- Cortex®-M7 MPU 内存映射是统一的。这意味着指令访问和数据访问具有相同的区域设置。
+- 如果程序访问 MPU 禁止的内存位置，处理器将生成 MemManage 故障。这会导致故障异常，并可能导致 OS 环境中的进程终止。在 OS 环境中，内核可以根据要执行的进程动态更新 MPU 区域设置。通常，嵌入式 OS 使用 MPU 进行内存保护。
+
+- WT（Write-Through）Write-Through 是一种缓存策略，当处理器写入数据到缓存时，数据会立即写入到主存（内存）中。这种策略确保缓存和主存中的数据始终保持一致，但会导致较高的写操作延迟，因为每次写操作都需要访问主存。
+- WB（Write-Back）Write-Back 是另一种缓存策略，当处理器写入数据到缓存时，数据只会写入到缓存中，而不会立即写入到主存。只有当缓存行被替换或刷新时，数据才会写入到主存。这种策略可以减少写操作的延迟，提高系统性能，但在缓存和主存之间的数据一致性管理上更加复杂。
+- alloc 通常指的是缓存分配（allocation）.配置是否分配（allocation）是为了控制在特定情况下是否为数据分配新的缓存行。这对于优化系统性能和管理缓存行为非常重要。
+	- 性能优化：
+		- 写分配（Write Allocate）：在写操作时，如果数据不在缓存中，处理器会将数据从主存加载到缓存中，并为其分配一个新的缓存行。这种策略可以提高后续对该数据的访问性能。
+		- 无写分配（No Write Allocate）：在写操作时，如果数据不在缓存中，处理器不会为其分配新的缓存行，而是直接写入主存。这种策略可以减少缓存的占用，适用于写操作较少的场景。
+	- 缓存一致性：
+		- 读分配（Read Allocate）：在读操作时，如果数据不在缓存中，处理器会将数据从主存加载到缓存中，并为其分配一个新的缓存行。这种策略可以提高后续对该数据的访问性能。
+		- 无读分配（No Read Allocate）：在读操作时，如果数据不在缓存中，处理器不会为其分配新的缓存行，而是直接从主存读取数据。这种策略可以减少缓存的占用，适用于读操作较少的场景。
+```c
+//访问权限字段
+enum ap {
+	NO_ACCESS = 0,	//所有访问都会产生权限错误		   特权权限[无]		用户权限[无]
+	PRIV_RW_USR_NO,	//仅从特权软件访问				   特权权限[读写]	用户权限[无]
+	PRIV_RW_USR_RO,	//非特权软件的写入会产生权限错误	特权权限[读写]	 用户权限[只读]
+	PRIV_RW_USR_RW,	//完全访问权限					 特权权限[读写]	 用户权限[读写]
+	UNPREDICTABLE,	//不可预测的访问权限
+	PRIV_RO_USR_NO,	//仅从特权软件访问				   特权权限[只读]	 用户权限[无]
+	PRIV_RO_USR_RO,	//只读，由特权或非特权软件读取		特权权限[只读]	 用户权限[只读]
+};
+//属性
+enum mr_attr {
+	STRONG_ORDER = 0,		//对强有序内存的所有访问均按程序顺序进行。所有强有序区域均假定为共享的。
+	SHARED_WRITE_BUFFERED,	//多个处理器共享的内存映射外设
+	O_I_WT_NO_WR_ALLOC,		//外部和内部直写。无写入分配
+	O_I_WB_NO_WR_ALLOC,		//外部和内部写缓存。无写入分配
+	O_I_NON_CACHEABLE,		//外部和内部均不可缓存
+	O_I_WB_RD_WR_ALLOC,		//外部和内部写缓存。写入和读取分配。
+	DEVICE_NON_SHARED,		//非共享设备
+};
+//指令访问禁止位
+enum xn {
+	XN_DIS = 0,	//启用指令提取
+	XN_EN,		//禁用指令提取
+};
+```
+
+### cache.c
+在 ARM 架构中，PoU（Point of Unification）和 PoC（Point of Coherency）是两个与缓存一致性相关的重要概念。它们用于描述缓存操作的范围和影响。
+
+1. PoU（Point of Unification）
+PoU 是指统一点，表示指令和数据缓存的统一点。在这个点上，指令缓存和数据缓存的内容是一致的。通常，PoU 是指缓存层次结构中的某个级别，在这个级别上，指令和数据缓存的内容可以被视为统一的。
+
+- 作用
+	- 指令和数据缓存一致性：确保在 PoU 处，指令缓存和数据缓存的内容是一致的。
+	- 缓存操作的范围：缓存操作（如清除、无效化）在 PoU 处生效，确保指令和数据缓存的一致性。
+2. PoC（Point of Coherency）
+PoC 是指一致性点，表示缓存和主存之间的一致性点。在这个点上，所有处理器和 DMA 设备都可以看到一致的内存视图。通常，PoC 是指缓存层次结构中的某个级别，在这个级别上，缓存和主存的内容是一致的。
+
+- 作用
+	- 缓存和主存一致性：确保在 PoC 处，缓存和主存的内容是一致的。
+	- 缓存操作的范围：缓存操作（如清除、无效化）在 PoC 处生效，确保缓存和主存的一致性。
+
+3. 使能缓存的步骤
+	- 清除和无效化缓存： 在使能缓存之前，通常需要清除和无效化缓存，以确保缓存中的数据是一致的。这可以防止缓存中的旧数据影响系统的正常运行。
+
+	- 配置缓存属性： 配置缓存的属性，如缓存策略（写回或直写）、缓存大小、缓存行大小等。这些属性决定了缓存的工作方式和性能。
+
+	- 使能缓存： 最后，通过设置特定的控制寄存器，使能指令缓存和数据缓存。
+```c
+/* PoU ： 统一点， Poc： 连贯点 */
+/*
+ * PoU 的缓存维护操作可用于同步 Cortex®-M7 数据和指令缓存之间的数据，例如当软件使用自修改代码时。
+ * PoC 的缓存维护操作可用于在 Cortex®-M7 数据缓存和外部代理（如系统 DMA）之间同步数据。
+*/
+enum cache_action {
+	INVALIDATE_POU,			/* 指令缓存使所有到统一点 (PoU) 的指令无效*/
+	INVALIDATE_POC,			/* 数据缓存通过地址到一致点（PoC）失效*/
+	INVALIDATE_SET_WAY,		/* 数据缓存通过 set/way 失效 */
+	FLUSH_POU,				/* 按地址将数据缓存至 PoU*/
+	FLUSH_POC,				/* 通过地址清理数据缓存到PoC*/
+	FLUSH_SET_WAY,			/* 按设置/方式清理数据缓存 */
+	FLUSH_INVAL_POC,		/* 数据缓存清理并按地址失效至 PoC */
+	FLUSH_INVAL_SET_WAY,	/* 通过 set/way 清理数据缓存并使之无效 */
+};
+
+static u32 *get_action_reg_set_ways(enum cache_action action)
+{
+	switch (action) {
+	case INVALIDATE_SET_WAY:
+		return V7M_CACHE_REG_DCISW;
+	case FLUSH_SET_WAY:
+		return V7M_CACHE_REG_DCCSW;
+	case FLUSH_INVAL_SET_WAY:
+		return V7M_CACHE_REG_DCCISW;
+	default:
+		break;
+	};
+
+	return NULL;
+}
+
+static u32 *get_action_reg_range(enum cache_action action)
+{
+	switch (action) {
+	case INVALIDATE_POU:
+		return V7M_CACHE_REG_ICIMVALU;
+	case INVALIDATE_POC:
+		return V7M_CACHE_REG_DCIMVAC;
+	case FLUSH_POU:
+		return V7M_CACHE_REG_DCCMVAU;
+	case FLUSH_POC:
+		return V7M_CACHE_REG_DCCMVAC;
+	case FLUSH_INVAL_POC:
+		return V7M_CACHE_REG_DCCIMVAC;
+	default:
+		break;
+	}
+
+	return NULL;
+}
+
+static void get_cache_ways_sets(struct dcache_config *cache)
+{
+	//标识当前由CSSELR选择的缓存的配置
+	u32 cache_size_id = readl(V7M_PROC_REG_CCSIDR);
+	//路径数：（路径数）- 1
+	cache->ways = (cache_size_id & MASK_NUM_WAYS) >> NUM_WAYS_SHIFT;
+	//表示集合的个数为：(number of sets) - 1。
+	cache->sets = (cache_size_id & MASK_NUM_SETS) >> NUM_SETS_SHIFT;
+}
+
+static int action_dcache_all(enum cache_action action)
+{
+	struct dcache_config cache;
+	u32 *action_reg;
+	int i, j;
+
+	action_reg = get_action_reg_set_ways(action);
+	if (!action_reg)
+		return -EINVAL;
+	//V7M_PROC_REG_CSSELR 缓存大小选择寄存器 
+	//SEL_I_OR_D 允许选择指令或数据缓存 0：表示数据缓存 1：表示指令缓存
+	clrbits_le32(V7M_PROC_REG_CSSELR, BIT(SEL_I_OR_D));
+	/* Make sure cache selection is effective for next memory access */
+	dsb();
+
+	get_cache_ways_sets(&cache);	/* Get number of ways & sets */
+	debug("cache: ways= %d, sets= %d\n", cache.ways + 1, cache.sets + 1);
+	for (i = cache.sets; i >= 0; i--) {
+		for (j = cache.ways; j >= 0; j--) {
+			writel((j << WAYS_SHIFT) 	//设置操作应用的/索引。缓存中的索引数取决于配置的缓存大小。当该值小于最大值时，使用该字段的LSB。缓存中的集合数量可以通过读取第219页的缓存大小ID寄存器来确定
+			| (i << SETS_SHIFT),		//这个操作适用于。对于数据缓存，取值为0、1、2和3。
+				   action_reg);
+		}
+	}
+
+	/* Make sure cache action is effective for next memory access */
+	dsb();
+	isb();	/* Make sure instruction stream sees it */
+
+	return 0;
+}
+
+
+void enable_caches(void)
+{
+#if !CONFIG_IS_ENABLED(SYS_ICACHE_OFF)
+	icache_enable();
+#endif
+#if !CONFIG_IS_ENABLED(SYS_DCACHE_OFF)
+	dcache_enable();
+#endif
+}
+```
+
+# borad
+## mach-stm32
+### soc.c
+- 配置MPU区域
+```c
+int arch_cpu_init(void)
+{
+	int i;
+
+	struct mpu_region_config stm32_region_config[] = {
+#if defined(CONFIG_STM32F4)
+		{ 0x00000000, REGION_0, 
+		XN_DIS, 					//启用执行保护
+		PRIV_RW_USR_RW,				//特权读写,用户读写
+		O_I_WB_RD_WR_ALLOC, 		//外部内部写缓存+读写分配缓存
+		REGION_512MB },
+#endif
+		{ 0x90000000, REGION_1, 
+		XN_DIS, 					//启用执行保护
+		PRIV_RW_USR_RW,				//特权读写,用户读写
+		SHARED_WRITE_BUFFERED, 		//多个处理器共享的内存映射外设
+		REGION_256MB },
+
+#if defined(CONFIG_STM32F7) || defined(CONFIG_STM32H7)
+		{ 0xC0000000, REGION_0, 
+		XN_DIS, 					//启用执行保护
+		PRIV_RW_USR_RW,				//特权读写,用户读写
+		O_I_WB_RD_WR_ALLOC,			//外部内部写缓存+读写分配缓存
+		REGION_512MB },	
+#endif
+	};
+
+	disable_mpu();
+	for (i = 0; i < ARRAY_SIZE(stm32_region_config); i++)
+		mpu_config(&stm32_region_config[i]);
+	enable_mpu();
+
+	return 0;
+}
+```
+
+### stm32h750-art-pi
+- stm32h750-art-pi.c
+```c
+int dram_init(void)
+{
+	struct udevice *dev;
+	int ret;
+
+	ret = uclass_get_device(UCLASS_RAM, 0, &dev);
+	if (ret) {
+		debug("DRAM init failed: %d\n", ret);
+		return ret;
+	}
+
+	if (fdtdec_setup_mem_size_base() != 0)
+		ret = -EINVAL;
+
+	return ret;
+}
+```
