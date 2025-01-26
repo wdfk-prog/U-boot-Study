@@ -1,5 +1,5 @@
 # env
-## U_BOOT_ENV_LOCATION
+# U_BOOT_ENV_LOCATION
 - 通过该宏定义环境变量的位置
 ```c
 /*
@@ -24,10 +24,9 @@
 
 ```
 
-## default_environment
+# default_environment
 ```c
 const char default_environment[] = {
-#endif
 #ifndef CONFIG_USE_DEFAULT_ENV_FILE
 #ifdef  CONFIG_ENV_CALLBACK_LIST_DEFAULT
     ENV_CALLBACK_VAR "=" CONFIG_ENV_CALLBACK_LIST_DEFAULT "\0"
@@ -173,10 +172,43 @@ const char default_environment[] = {
     "bootfstype; then part uuid ${devtype} ${devnum}:${distro_bootpart} "
     "distro_bootpart_uuid ; run scan_dev_for_boot; fi; done; setenv "
     "devplist\000bootcmd_mmc0=devnum=0; run mmc_boot\000distro_bootcmd=for "
-    "target in ${boot_targets}; do run bootcmd_${target}; done\000\000"}
+    "target in ${boot_targets}; do run bootcmd_${target}; done\000\000"
+};
+
+bootargs=console=ttySTM0,2000000 root=/dev/ram loglevel=8
+bootcmd=bootm 90080000
+bootdelay=3
+baudrate=2000000
+loadaddr=0xc1800000
+arch=arm
+cpu=armv7m
+board=stm32h750-art-pi
+board_name=stm32h750-art-pi
+vendor=st
+soc=stm32h7
+kernel_addr_r=0xC0008000
+fdtfile=stm32h750i-art-pi.dtb
+fdt_addr_r=0xC0408000
+scriptaddr=0xC0418000
+pxefile_addr_r=0xC0428000
+ramdisk_addr_r=0xC0438000
+mmc_boot=if mmc dev ${devnum}; then devtype=mmc; run scan_dev_for_boot_part; fi
+boot_prefixes=/ /boot/
+boot_scripts=boot.scr.uimg boot.scr
+boot_script_dhcp=boot.scr.uimg
+boot_targets=mmc0
+boot_syslinux_conf=extlinux/extlinux.conf
+boot_extlinux=sysboot ${devtype} ${devnum}:${distro_bootpart} any ${scriptaddr} ${prefix}${boot_syslinux_conf}
+scan_dev_for_extlinux=if test -e ${devtype} ${devnum}:${distro_bootpart} ${prefix}${boot_syslinux_conf}; then echo Found ${prefix}${boot_syslinux_conf}; run boot_extlinux; echo EXTLINUX FAILED: continuing...; fi
+boot_a_script=load ${devtype} ${devnum}:${distro_bootpart} ${scriptaddr} ${prefix}${script}; source ${scriptaddr}
+scan_dev_for_scripts=for script in ${boot_scripts}; do if test -e ${devtype} ${devnum}:${distro_bootpart} ${prefix}${script}; then echo Found U-Boot script ${prefix}${script}; run boot_a_script; echo SCRIPT FAILED: continuing...; fi; done
+scan_dev_for_boot=echo Scanning ${devtype} ${devnum}:${distro_bootpart}...; for prefix in ${boot_prefixes}; do run scan_dev_for_extlinux; run scan_dev_for_scripts; done;
+scan_dev_for_boot_part=part list ${devtype} ${devnum} -bootable devplist; env exists devplist || setenv devplist 1; for distro_bootpart in ${devplist}; do if fstype ${devtype} ${devnum}:${distro_bootpart} bootfstype; then part uuid ${devtype} ${devnum}:${distro_bootpart} distro_bootpart_uuid ; run scan_dev_for_boot; fi; done; setenv devplist
+bootcmd_mmc0=devnum=0; run mmc_boot
+distro_bootcmd=for target in ${boot_targets}; do run bootcmd_${target}; done
 ```
 
-## env_locations
+# env_locations
 ```c
 static enum env_location env_locations[] = {
 #ifdef CONFIG_ENV_IS_IN_EEPROM
@@ -215,12 +247,12 @@ static enum env_location env_locations[] = {
 };
 ```
 
-## env/env.c
+# env.c
 - 从其他存储位置加载环境变量
 - 其他地方没有存储则执行默认的环境变量
 - 这样可以在使用在其他地方配置好环境变量,然后在u-boot中直接使用
 
-### env_init
+## env_init
 ```c
 int env_init(void)
 {
@@ -256,7 +288,7 @@ int env_init(void)
 }
 ```
 
-### env_driver_lookup
+## env_driver_lookup
 - 根据优先级和操作查找环境驱动并返回
 ```c
 static struct env_driver *env_driver_lookup(enum env_operation op, int prio)
@@ -278,7 +310,7 @@ static struct env_driver *env_driver_lookup(enum env_operation op, int prio)
 }
 ```
 
-### arch_env_get_location
+## arch_env_get_location
 - 根据优先级返回环境位置
 ```c
 __weak enum env_location arch_env_get_location(enum env_operation op, int prio)
@@ -290,7 +322,7 @@ __weak enum env_location arch_env_get_location(enum env_operation op, int prio)
 }
 ```
 
-### _env_driver_lookup
+## _env_driver_lookup
 - 在段中查找环境驱动,匹配符合的环境位置
 ```c
 static struct env_driver *_env_driver_lookup(enum env_location loc)
@@ -310,8 +342,8 @@ static struct env_driver *_env_driver_lookup(enum env_location loc)
 }
 ```
 
-## env/common.c
-### env_get_from_linear
+# common.c
+## env_get_from_linear
 ```c
 static int env_get_from_linear(const char *env, const char *name, char *buf,
                    unsigned len)
@@ -354,7 +386,126 @@ static int env_get_from_linear(const char *env, const char *name, char *buf,
 }
 ```
 
-## env/nowhere.c 
+## env_set
+```c
+int env_set(const char *varname, const char *varvalue)
+{
+	const char * const argv[4] = { "setenv", varname, varvalue, NULL };
+
+	/* before import into hashtable */
+	if (!(gd->flags & GD_FLG_ENV_READY))
+		return 1;
+    //H_PROGRAMMATIC 指示导入来自 env_set（）
+	if (varvalue == NULL || varvalue[0] == '\0')
+        //没有值,则少个参数传入,所以是2
+        //执行删除操作
+		return env_do_env_set(0, 2, (char * const *)argv, H_PROGRAMMATIC);
+	else
+        //有值,则多一个参数传入,所以是3
+		//执行设置操作
+        return env_do_env_set(0, 3, (char * const *)argv, H_PROGRAMMATIC);
+}
+```
+
+## env_do_env_set
+```c
+int env_do_env_set(int flag, int argc, char *const argv[], int env_flag)
+{
+	int   i, len;
+	char  *name, *value, *s;
+	struct env_entry e, *ep;
+
+	debug("Initial value for argc=%d\n", argc);
+
+#if !IS_ENABLED(CONFIG_XPL_BUILD) && IS_ENABLED(CONFIG_CMD_NVEDIT_EFI)
+	if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'e')
+		return do_env_set_efi(NULL, flag, --argc, ++argv);
+#endif
+    //处理-或者-其他的参数
+	while (argc > 1 && **(argv + 1) == '-') {
+		char *arg = *++argv;
+
+		--argc;
+		while (*++arg) {
+			switch (*arg) {
+			case 'f':		/* force */
+				env_flag |= H_FORCE;
+				break;
+			default:
+				return CMD_RET_USAGE;
+			}
+		}
+	}
+    //不允许使用 = 赋值
+	if (strchr(name, '=')) {
+		printf("## Error: illegal character '=' "
+		       "in variable name \"%s\"\n", name);
+		return 1;
+	}
+	//删除操作
+	if (argc < 3 || argv[2] == NULL) {
+		int rc = hdelete_r(name, &env_htab, env_flag);
+
+		/* If the variable didn't exist, don't report an error */
+		return rc && rc != -ENOENT ? 1 : 0;
+	}
+	// 添加/替换
+	for (i = 2, len = 0; i < argc; ++i)
+		len += strlen(argv[i]) + 1;
+
+	value = malloc(len);
+	if (value == NULL) {
+		printf("## Can't malloc %d bytes\n", len);
+		return 1;
+	}
+    //拼接参数每个参数之间用空格隔开
+	for (i = 2, s = value; i < argc; ++i) {
+		char *v = argv[i];
+
+		while ((*s++ = *v++) != '\0')
+			;
+		*(s - 1) = ' ';
+	}
+    //如果分配的内存没有用完,则将最后一个空格替换为'\0'
+	if (s != value)
+		*--s = '\0';
+
+	e.key	= name;
+	e.data	= value;
+    //替换或插入现有数据
+	hsearch_r(e, ENV_ENTER, &ep, &env_htab, env_flag);
+	free(value);
+	if (!ep) {
+		printf("## Error inserting \"%s\" variable, errno=%d\n",
+			name, errno);
+		return 1;
+	}
+
+	return 0;
+}
+```
+
+## env_id
+```c
+/*
+ * 每次我们设置环境变量时，此变量都会递增，
+ * 因此我们可以通过 env_get_id（） 进行检查，以查看环境是否已更改。
+ * 这使得只有在环境已更改，通常由网络代码使用。
+ */
+static int env_id = 1;
+
+int env_get_id(void)
+{
+	return env_id;
+}
+
+void env_inc_id(void)
+{
+	env_id++;
+}
+```
+
+# nowhere.c 
 - 环墫位置为NOWHERE,无处可去的默认位置会执行这里
 - 根据env_locations的定义,这里是最低优先级的执行位置
 

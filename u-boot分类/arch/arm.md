@@ -313,6 +313,97 @@ relocate_done:
 ENDPROC(relocate_code)
 ```
 
+## interrupts_m.c
+```c
+/*
+ * 异常进入时 ARMv7-M 处理器会自动保存堆栈
+ * 包含一些寄存器的帧。为简单起见，初始
+ * implementation 仅使用此自动保存的堆栈帧。
+ * 这不包括完整的寄存器集转储、
+ * 仅保存 R0-R3、R12、LR、PC 和 xPSR。
+ */
+struct autosave_regs {
+	long uregs[8];
+};
+
+#define ARM_XPSR	uregs[7]
+#define ARM_PC		uregs[6]
+#define ARM_LR		uregs[5]
+#define ARM_R12		uregs[4]
+#define ARM_R3		uregs[3]
+#define ARM_R2		uregs[2]
+#define ARM_R1		uregs[1]
+#define ARM_R0		uregs[0]
+
+int interrupt_init(void)
+{
+	enable_interrupts();
+
+	return 0;
+}
+
+void enable_interrupts(void)
+{
+	return;
+}
+
+int disable_interrupts(void)
+{
+	return 0;
+}
+//打印系统寄存器,便于排查问题
+void dump_regs(struct autosave_regs *regs)
+{
+	printf("pc : %08lx    lr : %08lx    xPSR : %08lx\n",
+	       regs->ARM_PC, regs->ARM_LR, regs->ARM_XPSR);
+	printf("r12 : %08lx   r3 : %08lx    r2 : %08lx\n"
+		"r1 : %08lx    r0 : %08lx\n",
+		regs->ARM_R12, regs->ARM_R3, regs->ARM_R2,
+		regs->ARM_R1, regs->ARM_R0);
+}
+
+void bad_mode(void)
+{
+	panic("Resetting CPU ...\n");
+	reset_cpu();
+}
+// 错误处理函数
+void do_hard_fault(struct autosave_regs *autosave_regs)
+{
+	printf("Hard fault\n");
+	dump_regs(autosave_regs);
+	bad_mode();
+}
+
+void do_mm_fault(struct autosave_regs *autosave_regs)
+{
+	printf("Memory management fault\n");
+	dump_regs(autosave_regs);
+	bad_mode();
+}
+
+void do_bus_fault(struct autosave_regs *autosave_regs)
+{
+	printf("Bus fault\n");
+	dump_regs(autosave_regs);
+	bad_mode();
+}
+
+void do_usage_fault(struct autosave_regs *autosave_regs)
+{
+	printf("Usage fault\n");
+	dump_regs(autosave_regs);
+	bad_mode();
+}
+
+void do_invalid_entry(struct autosave_regs *autosave_regs)
+{
+	printf("Exception\n");
+	dump_regs(autosave_regs);
+	bad_mode();
+}
+```
+
 # cpu
 ## armv7m
 - 参考[PM0253 Cortex®-M7 编程手册 P221](../学习芯片/ART-PI/PM0253%20Cortex®-M7%20编程手册.pdf)
@@ -451,6 +542,7 @@ PoC 是指一致性点，表示缓存和主存之间的一致性点。在这个�
 	- 配置缓存属性： 配置缓存的属性，如缓存策略（写回或直写）、缓存大小、缓存行大小等。这些属性决定了缓存的工作方式和性能。
 
 	- 使能缓存： 最后，通过设置特定的控制寄存器，使能指令缓存和数据缓存。
+
 ```c
 /* PoU ： 统一点， Poc： 连贯点 */
 /*
@@ -467,7 +559,10 @@ enum cache_action {
 	FLUSH_INVAL_POC,		/* 数据缓存清理并按地址失效至 PoC */
 	FLUSH_INVAL_SET_WAY,	/* 通过 set/way 清理数据缓存并使之无效 */
 };
+```
 
+#### enable_caches
+```c
 static u32 *get_action_reg_set_ways(enum cache_action action)
 {
 	switch (action) {
@@ -558,6 +653,68 @@ void enable_caches(void)
 }
 ```
 
+#### flush_dcache_range
+```c
+void flush_dcache_range(unsigned long start, unsigned long stop)
+{
+	if (action_cache_range(FLUSH_POC, start, stop - start)) {
+		printf("ERR: D-cache not flushed\n");
+		return;
+	}
+}
+```
+
+### cpu.c
+#### reset_cpu
+```c
+/*
+ * Perform the low-level reset.
+ */
+void reset_cpu(void)
+{
+	/*
+	 * Perform reset but keep priority group unchanged.
+	 */
+	writel((V7M_AIRCR_VECTKEY << V7M_AIRCR_VECTKEY_SHIFT)
+		| (V7M_SCB->aircr & V7M_AIRCR_PRIGROUP_MSK)
+		| V7M_AIRCR_SYSRESET, &V7M_SCB->aircr);
+}
+```
+
+#### cleanup_before_linux
+```c
+/*
+ * This is called right before passing control to
+ * the Linux kernel point.
+ */
+int cleanup_before_linux(void)
+{
+	/*
+	 * this function is called just before we call linux
+	 * it prepares the processor for linux
+	 *
+	 * disable interrupt and turn off caches etc ...
+	 */
+	disable_interrupts();
+	/*
+	 * turn off D-cache
+	 * dcache_disable() in turn flushes the d-cache
+	 * MPU is still enabled & can't be disabled as the u-boot
+	 * code might be running in sdram which by default is not
+	 * executable area.
+	 */
+	dcache_disable();
+	/* invalidate to make sure no cache line gets dirty between
+	 * dcache flushing and disabling dcache */
+	invalidate_dcache_all();
+
+	icache_disable();
+	invalidate_icache_all();
+
+	return 0;
+}
+```
+
 # borad
 ## mach-stm32
 ### soc.c
@@ -600,7 +757,7 @@ int arch_cpu_init(void)
 ```
 
 ### stm32h750-art-pi
-- stm32h750-art-pi.c
+#### stm32h750-art-pi.c
 ```c
 int dram_init(void)
 {
@@ -618,4 +775,28 @@ int dram_init(void)
 
 	return ret;
 }
+```
+
+#### include/configs/stm32h750-art-pi.h
+```c
+//SDRAM 32MB 分配了24MB给内存 预留了8MB
+//其中2MB用于RAMDISK
+#define CFG_SYS_BOOTMAPSZ		(SZ_16M + SZ_8M)
+
+#define CFG_SYS_FLASH_BASE		0x90000000
+
+#define CFG_SYS_HZ_CLOCK		1000000
+
+#define BOOT_TARGET_DEVICES(func) \
+	func(MMC, mmc, 0)
+
+#include <config_distro_bootcmd.h>
+#define CFG_EXTRA_ENV_SETTINGS				\
+			"kernel_addr_r=0xC0008000\0"		\
+			"fdtfile=stm32h750i-art-pi.dtb\0"	\
+			"fdt_addr_r=0xC0408000\0"		\
+			"scriptaddr=0xC0418000\0"		\
+			"pxefile_addr_r=0xC0428000\0" \
+			"ramdisk_addr_r=0xC0438000\0"		\
+			BOOTENV
 ```

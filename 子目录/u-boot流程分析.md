@@ -160,6 +160,7 @@ static init_fnc_t init_sequence_r[] = {
 	run_main_loop,
 }
 ```
+
 # run_main_loop 运行主循环
 
 ## cli_init 命令行初始化
@@ -194,6 +195,10 @@ static init_fnc_t init_sequence_r[] = {
 # do_bootm 执行bootm命令
 
 ## bootm_run_states 执行bootm命令
+- bootm_find_os
+- bootm_find_other
+- bootm_disable_interrupts
+- bootm_load_os
 
 ## bootm_find_os 找到操作系统
 
@@ -213,9 +218,67 @@ static int boot_get_kernel(const char *addr_fit, struct bootm_headers *images,
 	*os_data = *os_len = 0;
 	buf = map_sysmem(img_addr, 0);
 	switch (genimg_get_format(buf)) {
+	case IMAGE_FORMAT_FIT:
+		os_noffset = fit_image_load(images, img_addr,
+				&fit_uname_kernel, &fit_uname_config,
+				IH_ARCH_DEFAULT, IH_TYPE_KERNEL,
+				BOOTSTAGE_ID_FIT_KERNEL_START,
+				FIT_LOAD_IGNORED, os_data, os_len);
+		if (os_noffset < 0)
+			return -ENOENT;
 
+		images->fit_hdr_os = map_sysmem(img_addr, 0);
+		images->fit_uname_os = fit_uname_kernel;
+		images->fit_uname_cfg = fit_uname_config;
+		images->fit_noffset_os = os_noffset;
+		break;
 	}
 }
 ```
 
-### 
+### genimg_get_format 获取镜像格式
+```c
+static int bootm_find_os(const char *cmd_name, const char *addr_fit)
+{
+	/* get kernel image header, start address and length */
+	ret = boot_get_kernel(addr_fit, &images, &images.os.image_start,
+			      &images.os.image_len, &os_hdr);
+	if (ret) {
+		if (ret == -EPROTOTYPE)
+			printf("Wrong Image Type for %s command\n", cmd_name);
+
+		printf("ERROR %dE: can't get kernel image!\n", ret);
+		return 1;
+	}
+}
+```
+
+### fit_image_load 加载 FIT 镜像
+```c
+IH_TYPE_KERNEL,			/* OS Kernel Image		*/
+```
+
+### fit_conf_get_node 获取 FIT 配置节点
+- 查找/configurations节点中的配置节点,默认为default的配置
+
+### fit_image_select 打印 FIT 镜像信息
+
+## bootm_find_other 找到其他镜像 ramdisk、fdt
+- 从镜像或者命令行中查找 ramdisk 和 fdt
+
+## bootm_disable_interrupts 禁用中断
+
+## bootm_load_os 加载操作系统
+
+### image_decomp 从镜像中解压
+
+## boot_ramdisk_high 加载 ramdisk 到顶部地址
+
+# do_bootm_linux 执行bootm命令 linux
+
+## boot_prep_linux 执行linux启动前的准备工作
+
+### image_setup_linux 从镜像中设置linux
+- 设置FDT内存保留区域 boot_fdt_add_mem_rsv_regions
+- 将FDT从内核镜像中拷贝到指定地址 boot_relocate_fdt
+- 将FDT转换为动态设备树 image_setup_libfdt

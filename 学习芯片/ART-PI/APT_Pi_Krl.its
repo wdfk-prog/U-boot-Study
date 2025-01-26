@@ -1,0 +1,57 @@
+
+/dts-v1/;
+ 
+/ {
+    description = "RT-Thread STM32H750i-ART-PI board";
+
+    images {
+        
+        kernel {
+            description = "Linux kernel for RT-Thread STM32H750i-ART-PI board";
+            data = /incbin/("./zImage");
+            type = "kernel";
+            arch = "arm";
+            os = "linux";
+            compression = "none";
+            load = <0xC0080000>;
+            entry = <0xC0080000>;
+            hash {
+                algo = "sha1";
+            };
+        };
+
+        fdt {
+            description = "Flattened Device Tree blob for for RT-Thread STM32H750i-ART-PI board";
+            data = /incbin/("./stm32h750i-art-pi.dtb");
+            type = "flat_dt";
+            arch = "arm";
+            os = "linux";
+            compression = "none";
+            hash {
+                algo = "sha1";
+            };
+        };
+
+        ramdisk {
+            description = "Ramdisk for for RT-Thread STM32H750i-ART-PI board";
+            data = /incbin/("./rootfs.ext2");
+            type = "ramdisk";
+            arch = "arm";
+            os = "linux";
+            compression = "none";
+            hash {
+                algo = "sha1";
+            };
+        };
+    };
+
+    configurations {
+        default = "conf0";
+        conf0 {
+            description = "Boot Linux kernel with FDT blob";
+            kernel = "kernel";
+            fdt = "fdt";
+            ramdisk = "ramdisk";
+        };
+    };
+};
