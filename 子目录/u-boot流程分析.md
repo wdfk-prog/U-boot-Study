@@ -7,7 +7,7 @@
 
 # _start函数
 - arch/arm/lib/vectors_m.S 编译的时候设置中断向量表
-- 执行了reset函数
+- 顺序执行下去,执行了reset函数
 
 # reset函数
 - arch/arm/cpu/armv7m/start.S 定义了reset函数,跳转到_main

@@ -3,8 +3,9 @@
 # art-pi构建命令
 
 ```sh
-make CROSS_COMPILE=arm-none-eabi- ARCH=arm stm32h750-art-pi_defconfig
-make CROSS_COMPILE=arm-none-eabi- ARCH=arm menuconfig
+export CROSS_COMPILE=arm-none-eabi- ARCH=arm
+make stm32h750-art-pi_defconfig
+make menuconfig
 	> Boot options        (console=ttySTM0,115200 root=/dev/ram loglevel=8) Boot arguments
 	> Device Drivers > Serial drivers        (115200) Default baudrate
 u-boot-v2021.07\arch\arm\dts\stm32h750i-art-pi.dts
@@ -16,7 +17,7 @@ u-boot-v2021.07\arch\arm\dts\stm32h750i-art-pi.dts
 		bootargs = "root=/dev/ram";
 		stdout-path = "serial0:115200n8";
 	};
-make CROSS_COMPILE=arm-none-eabi- ARCH=arm -j3
+make -j 12
 ```
 
 # Makefile
