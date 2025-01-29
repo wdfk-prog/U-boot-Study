@@ -149,6 +149,9 @@ make -f ./scripts/Makefile.build obj=scripts/basic
 
 ## -T 选项用于指定链接脚本
 
+## -Wno-maybe-uninitialized 禁用可能未初始化的警告
+
+
 # 环境变量 && 内置变量
 
 ## MAKECMDGOALS 包含在命令行中指定的所有目标
