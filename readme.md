@@ -494,7 +494,7 @@ objdump -d start.o
 # U-boot 分类
 
 ## arch
-- [arm](./u-boot分类/arch/arm.md)
+- [arm](./u-boot分类/arch/arm/arm.md)
 
 ## boot
 - [bootm](./u-boot分类/boot/bootm.md)

@@ -1,5 +1,103 @@
 [TOC]
 
+# Kconfig
+## 中断控制器
+### GIC (Generic Interrupt Controller) 通用中断控制器
+- GIC 是 ARM 处理器的一种通用中断控制器，用于管理和分发中断信号。GIC 支持多种中断类型，包括外部中断、定时器中断、软件中断等。GIC 通过中断控制器和中断分配器组件实现中断的管理和分发。
+#### GICv2
+- GICV2是 ARM 提供的第二版通用中断控制器，广泛应用于 ARMv7 和部分 ARMv8 架构的处理器中。
+- 中断管理：支持多达 1020 个中断源，包括外部中断和内部中断。提供中断优先级管理和中断屏蔽功能。
+- 分布式架构：包括一个分配器（Distributor）和多个 CPU 接口（CPU Interface），分配器负责中断的分发，CPU 接口负责中断的处理。
+- 中断路由：支持将中断路由到特定的 CPU 或多个 CPU，提供灵活的中断处理机制。
+- 软件生成中断：支持软件生成中断（SGI），允许处理器之间通过中断进行通信。
+
+#### GICv3
+- GICV3 是 ARM 提供的第三版通用中断控制器，广泛应用于 ARMv8 架构的处理器中。
+- 扩展的中断管理：支持多达 1020 个 SPI（共享外部中断）和 960 个 LPI（本地中断），提供更大的中断容量。
+提供更细粒度的中断优先级管理和中断屏蔽功能。
+- 增强的分布式架构：包括一个分配器（Distributor）、多个 Redistributor 和 CPU 接口，Redistributor 负责将中断分发到特定的 CPU 接口。
+- 中断路由和重定向：支持更灵活的中断路由和重定向机制，允许中断在不同的 CPU 之间动态分配。
+- 中断翻译服务（ITS）：支持中断翻译服务（Interrupt Translation Service, ITS），用于管理和配置 LPI，提供更高效的中断处理。
+- 电源管理：支持更高级的电源管理功能，允许在低功耗模式下更高效地管理中断。
+
+### NVIC (Nested Vectored Interrupt Controller) 嵌套向量中断控制器
+- ARMv7-M 架构的处理器（如 Cortex-M 系列）使用的是嵌入式中断控制器（Nested Vectored Interrupt Controller, NVIC），而不是通用中断控制器（GIC）。NVIC 是专门为嵌入式系统设计的中断控制器，集成在 Cortex-M 处理器内核中，提供了高效的中断管理和处理能力。
+- 嵌入式设计：NVIC 集成在 Cortex-M 处理器内核中，专为嵌入式系统设计，提供低延迟的中断响应。
+- 中断优先级管理：NVIC 支持多级中断优先级管理，允许开发者为每个中断源设置优先级，从而实现灵活的中断处理。
+- 向量表：NVIC 使用向量表来存储中断处理程序的入口地址。向量表通常位于内存的固定位置，处理器在接收到中断时会根据向量表跳转到相应的中断处理程序。
+- 中断屏蔽和使能：NVIC 提供中断屏蔽和使能功能，允许开发者在需要时屏蔽或使能特定的中断源。
+- 快速中断响应：NVIC 设计为低延迟的中断响应，适用于实时嵌入式系统。
+
+## Select the ARM data write cache policy 写入缓存策略
+### Write-back (WB) 写回
+- 特点:
+	- 写操作：写操作只更新缓存，并将缓存行标记为脏（dirty）。
+	- 内存更新：外部内存只有在缓存行被驱逐（evicted）或显式清除（cleaned）时才会更新。
+- 使用场景:
+	- 高性能计算：适用于需要高写性能的应用，因为写操作只更新缓存，减少了对外部内存的访问。
+	- 数据局部性强的应用：适用于数据局部性强的应用，缓存命中率高，减少了内存访问延迟。
+- 优点：
+	- 高写性能：写操作只更新缓存，减少了对外部内存的访问，提高了写性能。
+	- 减少内存带宽占用：减少了对外部内存的写操作，降低了内存带宽的占用。
+- 缺点：
+	- 数据一致性问题：需要额外的机制来确保缓存和内存之间的数据一致性，可能导致复杂的缓存管理。
+	- 延迟更新：外部内存的更新可能会延迟，导致数据一致性问题。
+
+### Write-through (WT) 写透
+- 特点
+	- 写操作：写操作同时更新缓存和外部内存。
+	- 内存更新：每次写操作都会更新外部内存，不会将缓存行标记为脏。
+- 使用场景
+	- 数据一致性要求高的应用：适用于需要确保缓存和内存之间数据一致性的应用，如实时系统和数据库。
+	- 读操作频繁的应用：适用于读操作频繁的应用，因为写操作不会影响读操作的性能。
+- 优点
+	- 数据一致性：每次写操作都会更新外部内存，确保缓存和内存之间的数据一致性。
+	- 简单的缓存管理：不需要额外的机制来管理缓存和内存之间的数据一致性。
+- 缺点
+	- 写性能较低：每次写操作都会更新外部内存，增加了写操作的延迟。
+	- 内存带宽占用高：每次写操作都会更新外部内存，增加了内存带宽的占用。。
+
+### WWrite allocation (WA) 写分配
+- 特点
+	- 写缺失：在写缺失（write miss）时分配缓存行。
+	- 缓存行填充：在执行写操作之前，会进行突发读取（burst read）以获取缓存行的数据。
+- 使用场景
+	- 写操作频繁的应用：适用于写操作频繁的应用，因为在写缺失时分配缓存行，提高了写操作的效率。
+	- 数据局部性较差的应用：适用于数据局部性较差的应用，因为在写缺失时分配缓存行，提高了缓存命中率。
+- 优点
+	- 提高写操作效率：在写缺失时分配缓存行，提高了写操作的效率。
+	- 提高缓存命中率：在写缺失时分配缓存行，提高了缓存命中率。
+- 缺点
+	- 突发读取开销：在写缺失时需要进行突发读取，增加了读取的开销。
+	- 复杂的缓存管理：需要额外的机制来管理缓存行的分配和填充。
+
+## instruction 指令
+### SYS_THUMB_BUILD
+- Thumb 指令集是 ARM 处理器的一种压缩指令集，旨在减少代码大小，同时保持较高的性能。在 Thumb 指令集中，许多常用指令被编码为 16 位（2 字节）宽，而不是标准 ARM 指令集中的 32 位（4 字节）宽。这使得 Thumb 指令集在内存受限的嵌入式系统中非常有用。
+
+- 使用此标志可使用 Thumb 指令集构建 U-Boot ARM 架构。Thumb 指令集提供更好的代码密度。对于支持 Thumb2 的 ARM 体系结构，此标志将导致 GCC 生成的 Thumb2 代码。
+
+## USE_ARCH_MEMCPY MEMMOVE MEMSET 使用体系结构优化的内存操作函数
+- 内存操作函数（如 memcpy、memmove、memset）是常用的 C 标准库函数，用于对内存进行复制、移动和设置操作。这些函数通常由编译器提供，但也可以通过使用体系结构优化的内存操作函数来提高性能。
+
+## Target select 选择目标芯片
+### ARCH_STM32
+```c
+config ARCH_STM32
+	bool "Support STMicroelectronics STM32 MCU with cortex M"
+	select CPU_V7M
+	select DM
+	select DM_SERIAL
+	imply CMD_DM
+```
+
+## SUPPORT_PASSING_ATAGS
+- 支持使用 ATAG 而不是传递一个 devicetree。 这个选项很少使用，并且语义在https://www.kernel.org/doc/Documentation/arm/Booting 第 4a 节。
+- ATAG（ARM Tag）是ARM架构中用于传递系统启动信息的一种数据结构。它通常在嵌入式系统中使用，特别是在系统启动时，ATAG会传递给操作系统内核，以便内核能够获取必要的启动参数和硬件信息。
+- ATAG由一系列标签（tag）组成，每个标签包含一个标识符和相关的数据。常见的标签类型包括内存大小和位置、命令行参数、初始化RAM磁盘等。每个标签都有一个标准的格式，通常以一个标识符开始，后跟数据长度和具体的数据内容。
+- 在系统启动时，启动加载程序（bootloader）会创建并填充ATAG数据结构，然后将其传递给内核。内核解析这些标签，获取系统启动所需的信息，从而正确地初始化系统。
+- ATAG在嵌入式系统中非常重要，因为它提供了一种灵活且标准化的方式来传递启动信息，确保操作系统能够适应不同的硬件配置和启动参数。
+
 # lds链接脚本 定义入口函数
 
 - 链接脚本定义了ENTRY(_start),即开始入口为_start
@@ -405,6 +503,265 @@ void do_invalid_entry(struct autosave_regs *autosave_regs)
 	bad_mode();
 }
 ```
+
+## setjmp.S 保存和恢复执行环境
+```asm
+// 将接下来的代码放入 .text.setjmp 段，并设置段属性为可执行和可分配。
+.pushsection .text.setjmp, "ax"
+//setjmp : 用于保存当前的执行环境
+ENTRY(setjmp)
+	/*
+	 * 子程序必须保留 registers 的内容
+	 * r4-r8、r10、r11（v1-v5、v7 和 v8）和 SP（以及 PCS 中的 r9
+	 * 将 R9 指定为 v6 的变体）。
+	 */
+	mov  ip, sp
+	stm  a1, {v1-v8, ip, lr}	//a1的内存位置存储系统寄存器数据
+	mov  a1, #0	//返回值为0
+	ret  lr	//返回到调用函数
+ENDPROC(setjmp)
+.popsection
+
+.pushsection .text.longjmp, "ax"
+ENTRY(longjmp)	//longjmp : 用于恢复之前保存的执行环境
+	ldm  a1, {v1-v8, ip, lr}	//从a1的内存位置读取系统寄存器数据
+	mov  sp, ip					//恢复堆栈指针
+	mov  a1, a2					//设置返回值
+	/* 如果传递的返回值为 0，则返回 1 */
+	cmp  a1, #0	
+	bne  1f
+	mov  a1, #1
+1:	
+	ret  lr	 					//返回到调用函数
+ENDPROC(longjmp)
+.popsection
+```
+
+## arch/arm/lib/memcpy.S
+- 比C库中的memcpy函数更高效的memcpy函数,因为使用了ldmia和stmia指令,可以一次性加载多个寄存器的值,然后一次性存储多个寄存器的值,提高了内存拷贝的效率
+- 且处理了不同的对齐情况,提高了内存拷贝的效率
+```c
+#define LDR1W_SHIFT	0
+#define STR1W_SHIFT	0
+
+	//加载ptr指针的值到reg寄存器中
+	.macro ldr8w ptr reg1 reg2 reg3 reg4 reg5 reg6 reg7 reg8 abort
+	ldmia \ptr!, {\reg1, \reg2, \reg3, \reg4, \reg5, \reg6, \reg7, \reg8}
+	.endm
+	//加载ptr指针的值到reg寄存器中
+	.macro ldr1b ptr reg cond=al abort
+	ldrb\cond\() \reg, [\ptr], #1
+	.endm
+	//将r0,reg1,reg2寄存器的值保存到栈中
+	.macro enter reg1 reg2
+	stmdb sp!, {r0, \reg1, \reg2}
+	.endm
+	//将栈中的值加载到r0,reg1,reg2寄存器中
+	.macro exit reg1 reg2
+	ldmfd sp!, {r0, \reg1, \reg2}
+	.endm
+/* Prototype: void *memcpy(void *dest, const void *src, size_t n); */
+	.syntax unified	//使用统一语法
+#if CONFIG_IS_ENABLED(SYS_THUMB_BUILD) && !defined(MEMCPY_NO_THUMB_BUILD)
+	.thumb	//使用thumb指令集
+	.thumb_func	//声明函数为thumb函数
+#endif
+ENTRY(memcpy)
+		//if(dest == src) return dest
+		cmp	r0, r1
+		reteq	lr	
+		//将r0, r4, lr的值保存到栈中
+		enter	r4, lr	
+		//n = n - 4; if(n < 0) goto 8f
+		subs	r2, r2, #4
+		blt	8f	//进行n在1~3的拷贝操作
+		//ip = &dest & 3;判定是否4字节对齐
+		ands	ip, r0, #3
+		//预取数据,减少后续内存访问的延迟，提高内存复制操作的性能
+PLD(	pld	[r1, #0]		)
+		bne	9f	//如果不是字节对齐,则跳转到9,进行未4字节对齐的拷贝操作
+		//ip = &src & 3;判定是否4字节对齐
+		ands	ip, r1, #3
+		bne	10f //如果不是字节对齐,则跳转到10
+
+		//dest和src都是4字节对齐的,直接进行拷贝操作
+		//如果n大于等于32,执行32字节的拷贝操作
+1:		subs	r2, r2, #(28)	//n = n - 28;因为上面已经减去了4,所以这里减去28
+		stmfd	sp!, {r5 - r8}	//将r5-r8的值保存到栈中,因为这些寄存器在后续的拷贝操作中会用到
+		blt	5f					//if(n < 0) goto 5;字节对齐,但是n < 32
+
+	CALGN(	ands	ip, r0, #31		)
+	CALGN(	rsb	r3, ip, #32		)
+	CALGN(	sbcsne	r4, r3, r2		)  @ C is always set here
+	CALGN(	bcs	2f			)
+	CALGN(	adr	r4, 6f			)
+	CALGN(	subs	r2, r2, r3		)  @ C gets set
+	CALGN(	add	pc, r4, ip		)
+
+		//进行n在4字节对齐的拷贝操作
+3:	PLD(	pld	[r1, #124]		)
+4:		ldr8w	r1, r3, r4, r5, r6, r7, r8, ip, lr, abort=20f	//把*src++取出8*4字节
+		subs	r2, r2, #32										//n = n - 32
+		str8w	r0, r3, r4, r5, r6, r7, r8, ip, lr, abort=20f	//*dest = *src 8*4字节
+		bge	3b	//if(n >= 32) goto 3b
+	PLD(	cmn	r2, #96			)
+	PLD(	bge	4b			)
+
+		//4字节对齐,但是n < 32
+5:		ands	ip, r2, #28	//n = n & 28;
+		rsb	ip, ip, #32		//n = 32 - n
+#if LDR1W_SHIFT > 0
+		lsl	ip, ip, #LDR1W_SHIFT
+#endif
+		//这里只有当n是4的倍数时才会执行;0,4,8,12,16,20,24,28
+		//if(n != 0) pc += n;即跳过几条指令
+		addne	pc, pc, ip		@ C is always clear here
+		b	7f	//否则进行剩余的拷贝操作,并退出
+
+6:		//用于加载单个字（4字节）的数据。
+        .rept	(1 << LDR1W_SHIFT)
+        W(nop)
+        .endr
+        ldr1w	r1, r3, abort=20f
+        ldr1w	r1, r4, abort=20f
+        ldr1w	r1, r5, abort=20f
+        ldr1w	r1, r6, abort=20f
+        ldr1w	r1, r7, abort=20f
+        ldr1w	r1, r8, abort=20f
+        ldr1w	r1, lr, abort=20f
+
+		//恢复上下文,准备退出
+7:		ldmfd	sp!, {r5 - r8}	//将栈中的值加载到r5-r8寄存器中
+		//进行n在1~3的拷贝操作
+		//其他n=2的情况不做判定,直接进行拷贝操作;比进行判定再拷贝效率更高
+8:		movs	r2, r2, lsl #31			//判定n是否为0,更新条件码
+		ldr1b	r1, r3, ne, abort=21f	//if(n != 0) r3 = *src++
+		ldr1b	r1, r4, cs, abort=21f	//if(n > 1) r4 = *src++
+		ldr1b	r1, ip, cs, abort=21f	//if(n > 1) ip = *src++
+		str1b	r0, r3, ne, abort=21f	//if(n != 0) *dest++ = r3
+		str1b	r0, r4, cs, abort=21f	//if(n > 1) *dest++ = r4
+		str1b	r0, ip, cs, abort=21f	//if(n > 1) *dest++ = ip
+
+		exit	r4, lr	//将栈中的值加载到r0, r4, lr寄存器中
+		ret	lr			//返回到调用函数
+
+		//进行未4字节对齐的拷贝操作
+9:		rsb	ip, ip, #4	//dest_offest = 4 - &dest & 3
+		//dest地址没有4字节对齐,判定dest地址对于4字节对齐的偏移量
+		cmp	ip, #2		//判定(dest_offest == 2),更新条件码
+		//偏移3,拷贝1次;以此类推
+		ldr1b	r1, r3, gt, abort=21f	//if(dest_offest == 3) r3 = *src++
+		ldr1b	r1, r4, ge, abort=21f	//if(dest_offest >= 2) r4 = *src++
+		ldr1b	r1, lr, abort=21f		//if(dest_offest >= 1) lr = *src++
+		str1b	r0, r3, gt, abort=21f	//if(dest_offest == 3) *dest++ = r3
+		str1b	r0, r4, ge, abort=21f	//if(dest_offest >= 2) *dest++ = r4
+		subs	r2, r2, ip				//n = n - offest;
+		str1b	r0, lr, abort=21f		//if(dest_offest >= 1) *dest++ = lr
+		blt	8b							//if(n < 0) goto 8b 没有需要额外拷贝的数据了
+		ands	ip, r1, #3				//src_offset = &src & 3
+		//src是4字节对齐的,直接进行拷贝操作
+		beq	1b							//if(src_offset == 0) goto 1b
+
+		//src地址没有4字节对齐的处理
+10:		bic	r1, r1, #3	//清除src地址的低2位
+		cmp	ip, #2		//判定(src_offset == 2),更新条件码
+		ldr1w	r1, lr, abort=21f	//if(src_offset >= 1) lr = *src++
+		beq	17f			//if(src_offset == 0) goto 17
+		bgt	18f			//if(src_offset > 2) goto 18
+
+		//将数据向前移动指定的字节数 pull:存储的字节数 push:移动的字节数
+		.macro	forward_copy_shift pull push
+
+		subs	r2, r2, #28	//n = n - 28;之前已经减去了4,所以这里减去28
+		blt	14f				//if(n < 0) goto 14
+
+	CALGN(	ands	ip, r0, #31		)
+	CALGN(	rsb	ip, ip, #32		)
+	CALGN(	sbcsne	r4, ip, r2		)  @ C is always set here
+	CALGN(	subcc	r2, r2, ip		)
+	CALGN(	bcc	15f			)
+
+11:		stmfd	sp!, {r5 - r9}	//将r5-r9的值保存到栈中
+	PLD(	pld	[r1, #0]		)
+	PLD(	subs	r2, r2, #96		)
+	PLD(	pld	[r1, #28]		)
+	PLD(	blt	13f			)
+	PLD(	pld	[r1, #60]		)
+	PLD(	pld	[r1, #92]		)
+
+12:	PLD(	pld	[r1, #124]		)
+		// 加载和存储多个字（4字节）的数据。
+13:		ldr4w	r1, r4, r5, r6, r7, abort=19f	//把*src++取出4*4字节
+		mov	r3, lr, lspull #\pull				//r3 = lr >> pull
+		subs	r2, r2, #32						//n = n - 32
+		ldr4w	r1, r8, r9, ip, lr, abort=19f	//把*src++取出4*4字节
+		orr	r3, r3, r4, lspush #\push			//r3 = r3 | r4 << push
+		mov	r4, r4, lspull #\pull				//r4 = r4 >> pull
+		orr	r4, r4, r5, lspush #\push			//r4 = r4 | r5 << push
+		mov	r5, r5, lspull #\pull
+		orr	r5, r5, r6, lspush #\push
+		mov	r6, r6, lspull #\pull
+		orr	r6, r6, r7, lspush #\push
+		mov	r7, r7, lspull #\pull
+		orr	r7, r7, r8, lspush #\push
+		mov	r8, r8, lspull #\pull
+		orr	r8, r8, r9, lspush #\push
+		mov	r9, r9, lspull #\pull
+		orr	r9, r9, ip, lspush #\push
+		mov	ip, ip, lspull #\pull
+		orr	ip, ip, lr, lspush #\push
+		str8w	r0, r3, r4, r5, r6, r7, r8, r9, ip, abort=19f
+		bge	12b
+	PLD(	cmn	r2, #96			)
+	PLD(	bge	13b			)
+
+		ldmfd	sp!, {r5 - r9}
+		//处理剩余的拷贝操作
+14:		ands	ip, r2, #28	//n = n & 28;
+		//这里只有当n是4的倍数时才会执行;0,4,8,12,16,20,24,28
+		beq	16f				//if(n == 0) goto 16
+		//存储单个字（4字节）的数据。
+15:		mov	r3, lr, lspull #\pull	
+		ldr1w	r1, lr, abort=21f
+		subs	ip, ip, #4
+		orr	r3, r3, lr, lspush #\push
+		str1w	r0, r3, abort=21f
+		bgt	15b				//if(n > 0) goto 15
+	CALGN(	cmp	r2, #0			)
+	CALGN(	bge	11b			)
+		//调整源地址
+16:		sub	r1, r1, #(\push / 8)	//r1 = r1 - push / 8
+		b	8b						//跳转到8b,进行剩余的拷贝操作,并退出
+
+		.endm
+
+17:		forward_copy_shift	pull=16	push=16
+
+18:		forward_copy_shift	pull=24	push=8
+/*
+ * Abort preamble and completion macros.
+ * If a fixup handler is required then those macros must surround it.
+ * It is assumed that the fixup code will handle the private part of
+ * the exit macro.
+ */
+
+	.macro	copy_abort_preamble
+19:	ldmfd	sp!, {r5 - r9}
+	b	21f
+20:	ldmfd	sp!, {r5 - r8}
+21:
+	.endm
+	// 错误处理逻辑
+	// 恢复寄存器状态并返回错误
+	.macro	copy_abort_end
+	ldmfd	sp!, {r4, lr}	//将栈中的值加载到r0, r4, lr寄存器中
+	ret	lr					//返回到调用函数
+	.endm
+ENDPROC(memcpy)
+```
+
+## arch/arm/lib/memset.S
+- 同理
 
 # cpu
 ## armv7m
