@@ -53,7 +53,9 @@ static int abortboot(int bootdelay)
 ```
 
 ## passwd_abort_key
-- 输入`bootdelaykey`或者`bootstopkey`中的任意一个按键,则返回1
+- 输入`bootdelaykey`或者`bootstopkey`中的任意一个按键,则返回1;终止自动启动
+- `bootdelaykey`的匹配字符串为env中的`bootdelaykey`的值,如果没有配置,则使用`CONFIG_AUTOBOOT_DELAY_STR`的值
+- `bootstopkey`的匹配字符串为env中的`bootstopkey`的值,如果没有配置,则使用`CONFIG_AUTOBOOT_STOP_STR`的值
 ```c
 static int passwd_abort_key(uint64_t etime)
 {
@@ -70,11 +72,11 @@ static int passwd_abort_key(uint64_t etime)
 
     char presskey[DELAY_STOP_STR_MAX_LENGTH];
     //需要匹配的输入字符串,env中没有配置则宏定义的字符串
-#  ifdef CONFIG_AUTOBOOT_DELAY_STR
+#  ifdef CONFIG_AUTOBOOT_DELAY_STR  //默认为"",即任意都不匹配
     if (delaykey[0].str == NULL)
         delaykey[0].str = CONFIG_AUTOBOOT_DELAY_STR;
 #  endif
-#  ifdef CONFIG_AUTOBOOT_STOP_STR
+#  ifdef CONFIG_AUTOBOOT_STOP_STR   //默认为" ",即输入空格终止
     if (delaykey[1].str == NULL)
         delaykey[1].str = CONFIG_AUTOBOOT_STOP_STR;
 #  endif
@@ -95,8 +97,9 @@ static int passwd_abort_key(uint64_t etime)
                         "stop");
 
                 /* don't retry auto boot */
+                //如果是STOP按键,则不再重试
                 if (!delaykey[i].retry)
-                    bootretry_dont_retry();
+                    bootretry_dont_retry(); //重试时间设置为-1,不在重试
                 abort = 1;
             }
         }

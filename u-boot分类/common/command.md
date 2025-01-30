@@ -71,6 +71,10 @@ int cmd_never_repeatable(struct cmd_tbl *cmdtp, int flag, int argc,
 
     return cmdtp->cmd(cmdtp, flag, argc, argv);
 }
+
+struct cmd_tbl *find_cmd(const char *cmd);
+struct cmd_tbl *find_cmd_tbl(const char *cmd, struct cmd_tbl *table,
+			     int table_len); //查找命令表中的命令
 ```
 
 ## cmd_process
@@ -135,50 +139,249 @@ enum command_ret_t cmd_process(int flag, int argc, char *const argv[],
 }
 ```
 
-## find_cmd
+## cmd_auto_complete 自动补全
 ```c
-/* find command table entry for a command */
-struct cmd_tbl *find_cmd_tbl(const char *cmd, struct cmd_tbl *table,
-                 int table_len)
+int cmd_auto_complete(const char *const prompt, char *buf, int *np, int *colp)
+{
+	char tmp_buf[CONFIG_SYS_CBSIZE + 1];	/* copy of console I/O buffer */
+	int n = *np, col = *colp;
+	char *argv[CONFIG_SYS_MAXARGS + 1];		/* NULL terminated	*/
+	char *cmdv[20];
+	char *s, *t;
+	const char *sep;
+	int i, j, k, len, seplen, argc;
+	int cnt;
+	char last_char;
+#ifdef CONFIG_CMDLINE_PS_SUPPORT
+	const char *ps_prompt = env_get("PS1");
+#else
+	const char *ps_prompt = CONFIG_SYS_PROMPT;
+#endif
+
+	if (strcmp(prompt, ps_prompt) != 0)
+		return 0;	/* not in normal console */
+
+	cnt = strlen(buf);
+	if (cnt >= 1)
+		last_char = buf[cnt - 1];
+	else
+		last_char = '\0';
+
+	/* copy to secondary buffer which will be affected */
+	strcpy(tmp_buf, buf);
+
+	// 识别空格分隔的参数数量
+	argc = make_argv(tmp_buf, sizeof(argv)/sizeof(argv[0]), argv);
+
+	//匹配$补全环境变量
+	i = dollar_complete(argc, argv, last_char,
+			    sizeof(cmdv) / sizeof(cmdv[0]), cmdv);
+	if (!i) {
+		/* 补全命令和子命令和环境变量,返回匹配的数量,补全的命令存放在cmdv中 */
+		i = complete_cmdv(argc, argv, last_char,
+				  sizeof(cmdv) / sizeof(cmdv[0]), cmdv);
+	}
+
+	/* 不匹配;响铃结束 */
+	if (i == 0) {
+		if (argc > 1)	/* 允许非命令的选项卡 */
+			return 0;
+		putc('\a');
+		return 1;
+	}
+
+	s = NULL;
+	len = 0;
+	sep = NULL;
+	seplen = 0;
+	if (i == 1) { /* 只有一个匹配 */
+		if (last_char != '\0' && !isblank(last_char))
+			k = strlen(argv[argc - 1]); //最后一个参数的长度
+		else
+			k = 0;  //最后一个参数为空
+
+		s = cmdv[0] + k;//字符串指针指向匹配的命令
+		len = strlen(s);
+		sep = " ";
+		seplen = 1;
+	} else if (i > 1 && (j = find_common_prefix(cmdv)) != 0) { /* more */
+		if (last_char != '\0' && !isblank(last_char))
+			k = strlen(argv[argc - 1]); //最后一个参数的长度
+		else
+			k = 0;  //最后一个参数为空
+
+		j -= k;
+		if (j > 0) {    //需要额外的字符显示
+			s = cmdv[0] + k;
+			len = j;
+		}
+	}
+
+	if (s != NULL) {
+		k = len + seplen;
+		/*/当前光标位置 + 补全的命令长度 + 分隔符长度 > 最大长度*/
+		if (n + k >= CONFIG_SYS_CBSIZE - 2) {
+			putc('\a');
+			return 1;
+		}
+
+		t = buf + cnt;  //指向字符串的末尾
+		for (i = 0; i < len; i++)
+			*t++ = *s++;    //将补全的命令拷贝到buf中
+		if (sep != NULL)
+			for (i = 0; i < seplen; i++)
+				*t++ = sep[i];  //拷贝分隔符
+		*t = '\0';  //字符串结束符
+		n += k;     //光标位置
+		col += k;   //缓存区字符数
+		puts(t - k);    //打印补全的命令
+		if (sep == NULL)
+			putc('\a');
+		*np = n;
+		*colp = col;
+	} else {
+        //打印命令列表
+		print_argv(NULL, "  ", " ", 78, cmdv);
+        //打印提示符
+		puts(prompt);
+		//打印输入的命令与补全的命令
+        puts(buf);
+	}
+	return 1;
+}
+```
+
+## make_argv 识别传入字符串中的参数数量
+- 识别空格分隔的参数数量
+
+## complete_cmdv
+## complete_subcmdv 自动补全子命令
+```c
+int complete_subcmdv(struct cmd_tbl *cmdtp, int count, int argc,
+		     char *const argv[], char last_char,
+		     int maxv, char *cmdv[])
 {
 #ifdef CONFIG_CMDLINE
-    struct cmd_tbl *cmdtp;
-    struct cmd_tbl *cmdtp_temp = table; /* Init value */
-    const char *p;
-    int len;
-    int n_found = 0;
+	const struct cmd_tbl *cmdend = cmdtp + count;
+	const char *p;
+	int len, clen;
+	int n_found = 0;
+	const char *cmd;
 
-    if (!cmd)
-        return NULL;
-    /*
-     * Some commands allow length modifiers (like "cp.b");
-     * compare command name only until first dot.
-     */
-    len = ((p = strchr(cmd, '.')) == NULL) ? strlen (cmd) : (p - cmd);
+	/* sanity? */
+	if (maxv < 2)
+		return -2;
 
-    for (cmdtp = table; cmdtp != table + table_len; cmdtp++) {
-        if (strncmp(cmd, cmdtp->name, len) == 0) {
-            if (len == strlen(cmdtp->name))
-                return cmdtp;   /* full match */
+	cmdv[0] = NULL;
 
-            cmdtp_temp = cmdtp; /* abbreviated command ? */
-            n_found++;
-        }
-    }
-    if (n_found == 1) {         /* exactly one match */
-        return cmdtp_temp;
-    }
-#endif /* CONFIG_CMDLINE */
+	if (argc == 0) {    //tab键补全命令 没有任何字符,进行列表打印
+		/* output full list of commands */
+		for (; cmdtp != cmdend; cmdtp++) {
+			if (n_found >= maxv - 2) {  //超过最大数量
+				cmdv[n_found++] = "...";    //显示省略号
+				break;
+			}
+			cmdv[n_found++] = cmdtp->name;
+		}
+		cmdv[n_found] = NULL;
+		return n_found;
+	}
 
-    return NULL;    /* not found or ambiguous command */
+	/*
+        输入了多个参数。          `ls -l`
+        输入了一个参数并按下空格。 `ls `
+        输入了一个参数并按下回车。 `ls`
+    */
+	if (argc > 1 || last_char == '\0' || isblank(last_char)) {
+		cmdtp = find_cmd_tbl(argv[0], cmdtp, count);
+		if (cmdtp == NULL || cmdtp->complete == NULL) {
+			cmdv[0] = NULL;
+			return 0;
+		}
+        //调用子命令的自动补全函数,补全子命令的参数
+		return (*cmdtp->complete)(argc, argv, last_char, maxv, cmdv);
+	}
+
+	cmd = argv[0];
+	/*
+	 * Some commands allow length modifiers (like "cp.b");
+	 * compare command name only until first dot.
+	 */
+	p = strchr(cmd, '.');
+	if (p == NULL)
+		len = strlen(cmd);
+	else
+		len = p - cmd;
+
+	// 遍历命令表,查找匹配的命令
+	for (; cmdtp != cmdend; cmdtp++) {
+
+		clen = strlen(cmdtp->name);
+		if (clen < len)
+			continue;
+
+		if (memcmp(cmd, cmdtp->name, len) != 0)
+			continue;
+
+		/* too many! */
+		if (n_found >= maxv - 2) {
+			cmdv[n_found++] = "...";
+			break;
+		}
+
+		cmdv[n_found++] = cmdtp->name;
+	}
+
+	cmdv[n_found] = NULL;
+	return n_found;
+#else
+	return 0;
+#endif
 }
+```
 
-struct cmd_tbl *find_cmd(const char *cmd)
+## find_common_prefix 查找匹配的命令的公共前缀
+```c
+static int find_common_prefix(char *const argv[])
 {
-    struct cmd_tbl *start = ll_entry_start(struct cmd_tbl, cmd);
-    const int len = ll_entry_count(struct cmd_tbl, cmd);
-    return find_cmd_tbl(cmd, start, len);
+	int i, len;
+	char *anchor, *s, *t;
+
+	if (*argv == NULL)
+		return 0;
+
+	/* begin with max */
+	anchor = *argv++;
+	len = strlen(anchor);
+    //s:当前命令,t:下一个命令,在while中不断指向下一个命令
+	while ((t = *argv++) != NULL) {
+		s = anchor;
+		for (i = 0; i < len; i++, t++, s++) {
+            //比较命令的字符不相同,退出循环
+			if (*t != *s)
+				break;
+		}
+		len = s - anchor;   //记录公共前缀的长度,最后返回最小的公共前缀长度
+	}
+	return len;
 }
+```
+
+## print_argv 打印命令列表
+```c
+/**
+ * @banner: 在参数之前打印的字符串。
+ * @leader: 在每个参数之前打印的字符串。
+ * @sep: 在每个参数之间打印的字符串。
+ * @linemax: 每行的最大字符数。
+ *
+ * 此函数以格式化的方式打印命令行参数。
+ * 首先打印 @banner，然后每个参数前缀 @leader 并用 @sep 分隔。
+
+ 举例： print_argv("Command List", "> ", ", ", 20, (char *const []){"git", "status", "commit", "push", "pull", NULL});
+    输出： Command List
+          > git, status, commit, push, pull
+ */
 ```
 
 ## cmd_usage
