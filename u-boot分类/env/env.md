@@ -247,6 +247,34 @@ static enum env_location env_locations[] = {
 };
 ```
 
+# initr_env
+```c
+static int initr_env(void)
+{
+	/* initialize environment */
+	if (should_load_env())  //使用默认环境或者从其他地方加载环境
+		env_relocate();
+	else
+		env_set_default(NULL, 0);
+
+	env_import_fdt();   //导入fdt环境变量
+
+	if (IS_ENABLED(CONFIG_OF_CONTROL))
+		env_set_hex("fdtcontroladdr",
+			    (unsigned long)map_to_sysmem(gd->fdt_blob));
+
+	#if (IS_ENABLED(CONFIG_SAVE_PREV_BL_INITRAMFS_START_ADDR) || \
+						IS_ENABLED(CONFIG_SAVE_PREV_BL_FDT_ADDR))
+		save_prev_bl_data();
+	#endif
+
+	/* Initialize from environment */
+	image_load_addr = env_get_ulong("loadaddr", 16, image_load_addr);
+
+	return 0;
+}
+```
+
 # env.c
 - 从其他存储位置加载环境变量
 - 其他地方没有存储则执行默认的环境变量
@@ -485,7 +513,7 @@ int env_do_env_set(int flag, int argc, char *const argv[], int env_flag)
 }
 ```
 
-## env_id
+## env_id 可以检查环境是否已更改
 ```c
 /*
  * 每次我们设置环境变量时，此变量都会递增，
@@ -507,6 +535,34 @@ void env_inc_id(void)
 
 ## env_complete env变量补全
 
+## env_get 从环境变量中获取值
+- 根据当前状态,使用不同的方式获取环境变量
+```c
+char *env_get(const char *name)
+{
+	if (gd->flags & GD_FLG_ENV_READY) { /* after import into hashtable */
+		struct env_entry e, *ep;
+
+		schedule();
+
+		e.key	= name;
+		e.data	= NULL;
+		hsearch_r(e, ENV_FIND, &ep, &env_htab, 0);
+
+		return ep ? ep->data : NULL;
+	}
+
+	/* restricted capabilities before import */
+	if (env_get_f(name, (char *)(gd->env_buf), sizeof(gd->env_buf)) >= 0)
+		return (char *)(gd->env_buf);
+
+	return NULL;
+}
+```
+
+## env_get_from_linear
+- 识别`\0`结束符,匹配name,返回value
+- 一个个搜索过去
 
 # nowhere.c 
 - 环墫位置为NOWHERE,无处可去的默认位置会执行这里
@@ -519,4 +575,78 @@ U_BOOT_ENV_LOCATION(nowhere) = {
     .load       = env_nowhere_load,
     ENV_NAME("nowhere")
 };
+```
+
+# callback.c 执行环境变量修改时的回调函数
+- 立刻刷新内部值等处理
+
+## U_BOOT_ENV_CALLBACK
+```c
+#define U_BOOT_ENV_CALLBACK(name, callback) \
+	ll_entry_declare(struct env_clbk_tbl, name, env_clbk) = \
+	{#name, callback}
+
+//在段中查找回调函数
+static struct env_clbk_tbl *find_env_callback(const char *name)
+{
+	struct env_clbk_tbl *clbkp;
+	int i;
+	int num_callbacks = ll_entry_count(struct env_clbk_tbl, env_clbk);
+
+	if (name == NULL)
+		return NULL;
+
+	/* look up the callback in the linker-list */
+	for (i = 0, clbkp = ll_entry_start(struct env_clbk_tbl, env_clbk);
+	     i < num_callbacks;
+	     i++, clbkp++) {
+		if (strcmp(name, clbkp->name) == 0)
+			return clbkp;
+	}
+
+	return NULL;
+}
+```
+
+## env_callback_init
+```c
+static int first_call = 1;
+static const char *callback_list;
+
+/*
+ * Look for a possible callback for a newly added variable
+ * This is called specifically when the variable did not exist in the hash
+ * previously, so the blanket update did not find this variable.
+ */
+void env_callback_init(struct env_entry *var_entry)
+{
+	const char *var_name = var_entry->key;
+	char callback_name[256] = "";
+	struct env_clbk_tbl *clbkp;
+	int ret = 1;
+
+	if (first_call) {
+        //从环境变量".callback"中获取回调函数列表
+		callback_list = env_get(ENV_CALLBACK_VAR);
+		first_call = 0;
+	}
+
+	var_entry->callback = NULL;
+
+	/*在 “.callbacks” 变量中查找对此变量的引用 */
+	if (callback_list != NULL)
+		ret = env_attr_lookup(callback_list, var_name, callback_name);
+
+	/* 仅当在那里找不到时，才查看静态列表 */
+	if (ret)
+		ret = env_attr_lookup(ENV_CALLBACK_LIST_STATIC, var_name,
+			callback_name);
+
+	/* 如果找到关联，则设置回调指针 */
+	if (!ret && strlen(callback_name)) {
+		clbkp = find_env_callback(callback_name);
+		if (clbkp != NULL)
+			var_entry->callback = clbkp->callback;
+	}
+}
 ```
