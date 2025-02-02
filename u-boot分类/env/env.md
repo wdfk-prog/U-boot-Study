@@ -650,3 +650,58 @@ void env_callback_init(struct env_entry *var_entry)
 	}
 }
 ```
+
+# attr.c
+- 属性值是直接在env的key上的,例如"key:[attr1,attr2,attr3] = value"
+## env_attr_walk
+- 传入一个值和其属性的列表,遍历并执行回调函数,传入值和属性
+```c
+const char *attr_list = "var1:attr1,var2:attr2,var3:attr3";
+    env_attr_walk(attr_list, print_attr, NULL);
+```
+
+## CONFIG_REGEX 正则表达式支持
+
+## env_attr_lookup
+- 从属性列表中根据名称返回其属性
+
+# flags.c
+- 环境变量的标志位
+- 直接存储为单独的变量
+
+1. 调用
+`env_flags_validate`: 在创建、覆盖或删除环境变量时调用此函数。 当设置了（标志和H_FORCE）时，不要打印出任何错误消息并强制覆盖一次性写入变量。
+ 
+
+2. 设置:`on_flags`:环境变量`flag`变化时,通过callback函数调用;
+    - 遍历所有的环境变量执行`clear_flags`函数清除标志位
+    - `ENV_FLAGS_LIST_STATIC`中的识别attr,调用`set_flags`函数设置标志位
+    - `value`中的识别attr,调用`set_flags`函数设置标志位
+
+3. 识别:`env_parse_flags_to_bin`将字符串转换为标志位
+    ```c
+    enum env_flags_vartype {
+        env_flags_vartype_string,
+        env_flags_vartype_decimal,
+        env_flags_vartype_hex,
+        env_flags_vartype_bool,
+    #ifdef CONFIG_NET
+        env_flags_vartype_ipaddr,
+        env_flags_vartype_macaddr,
+    #endif
+        env_flags_vartype_end
+    };
+
+    enum env_flags_varaccess {
+        env_flags_varaccess_any,            //任意
+        env_flags_varaccess_readonly,       //只读
+        env_flags_varaccess_writeonce,      //只写一次
+        env_flags_varaccess_changedefault,  //改变默认值
+    #ifdef CONFIG_ENV_WRITEABLE_LIST
+        env_flags_varaccess_writeable,      //可写
+    #endif
+        env_flags_varaccess_end            //结束
+    };
+    ```
+
+4. 新建:`env_flags_init`: 在新建环境变量时调用此函数。如果环境变量具有标志，则调用`env_parse_flags_to_bin`函数将标志转换为二进制值。
