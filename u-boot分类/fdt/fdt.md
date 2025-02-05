@@ -784,3 +784,19 @@ int fdt_initrd(void *fdt, ulong initrd_start, ulong initrd_end)
 - 此外，FDT 的末尾与 4KB 边界对齐，因此它最终可能会比需要大 4KB。 
 - 如果 FDT 中存在 @blob 的现有内存预留，则会将其更新为新大小。
 - 最终的FDT是一个完整的FDT，大小与之前的FDT相同，但是都被分配为内存预留。
+
+# fdt
+## fdt_first_subnode 
+- 给出下一个节点的偏移量
+```c
+int fdt_first_subnode(const void *fdt, int offset)
+{
+	int depth = 0;
+
+	offset = fdt_next_node(fdt, offset, &depth);
+	if (offset < 0 || depth != 1)
+		return -FDT_ERR_NOTFOUND;
+
+	return offset;
+}
+```
