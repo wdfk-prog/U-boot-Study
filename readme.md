@@ -6,7 +6,7 @@
 export CROSS_COMPILE=arm-none-eabi- ARCH=arm
 make stm32h750-art-pi_defconfig
 make menuconfig
-	> Boot options        (console=ttySTM0,115200 root=/dev/ram loglevel=8) Boot arguments
+	> Boot options        (console=ttySTM0,11520.0 root=/dev/ram loglevel=8) Boot arguments
 	> Device Drivers > Serial drivers        (115200) Default baudrate
 u-boot-v2021.07\arch\arm\dts\stm32h750i-art-pi.dts
 	chosen {
@@ -531,4 +531,3 @@ objdump -d start.o
 
 ## lib
 - [lib](./u-boot分类/lib/lib.md)
-

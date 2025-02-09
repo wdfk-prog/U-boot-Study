@@ -1,4 +1,131 @@
 [TOC]
+# 驱动初始化及绑定与探测流程
+1. 存储在段中的驱动设备信息
+2. 初始化驱动模型结构,初始化根节点
+3. 从FDT中扫描设备并绑定到根节点
+4. 绑定后分配设备私有数据大小,与注册设备数据`driver_data`
+5. 绑定设备到父设备与uclass上
+6. 绑定后探测根节点下的子设备和子设备的子设备
+- 总结如下:
+	- 扫描FDT的设备并与driver的compatible匹配后,进行绑定与挂载到父设备与根节点上
+	- 使用malloc分配设备使用的私有数据,并设置设备的driver_data
+	- 绑定后执行设备识别`device_probe`函数,顺序根据注册的顺序执行,注册顺序为FDT节点的顺序;
+- 设备绑定分为重定向之前绑定和重定向之后绑定,
+	1. 重定向之前需要绑定的设备FDT节点中需要具有`bootph-all`或`bootph-some-ram`,`bootph-pre-ram`,`bootph-pre-sram`属性,且设备驱动信息flag中需要有`DM_FLAG_PRE_RELOC`标志
+	2. 否则都是重定向之后绑定
+
+## dm_init_and_scan
+### dm_init 初始化驱动模型结构,初始化根节点
+### dm_scan 设备扫描并绑定到根节点
+#### dm_scan_plat 绑定段中的driver_info
+```c
+U_BOOT_DRVINFOS(lpc32xx_uarts) = {
+	{ "ns16550_serial", &lpc32xx_uart[0], },
+	{ "ns16550_serial", &lpc32xx_uart[1], },
+	{ "ns16550_serial", &lpc32xx_uart[2], },
+	{ "ns16550_serial", &lpc32xx_uart[3], },
+};
+U_BOOT_DRVINFO(button_kbd) = {
+	.name = "button_kbd"
+};
+```
+#### dm_extended_scan 从FDT中扫描设备并绑定到根节点
+##### dm_scan_fdt 从FDT的每个节点获取compatible信息并与段中的driver结构体的of_match信息匹配,进而绑定设备
+- 调用`lists_bind_fdt`,进行绑定
+- 扫描FDT中的节点并根据节点属性; 注意节点若具有`satus`属性,则值为`ok`,则才会绑定设备
+- 匹配FDT中的`compatible`字符串和段中的`of_match`信息
+	```c
+	//dts 匹配完全"st,stm32h743-rcc"
+	static const struct udevice_id stm32_rcc_ids[] = {
+		{.compatible = "st,stm32f42xx-rcc", .data = (ulong)&stm32_rcc_clk_f42x },
+		{.compatible = "st,stm32f469-rcc", .data = (ulong)&stm32_rcc_clk_f469 },
+		{.compatible = "st,stm32f746-rcc", .data = (ulong)&stm32_rcc_clk_f7 },
+		{.compatible = "st,stm32h743-rcc", .data = (ulong)&stm32_rcc_clk_h7 },
+		{.compatible = "st,stm32mp1-rcc", .data = (ulong)&stm32_rcc_clk_mp1 },
+		{.compatible = "st,stm32mp1-rcc-secure", .data = (ulong)&stm32_rcc_clk_mp1 },
+		{.compatible = "st,stm32mp13-rcc", .data = (ulong)&stm32_rcc_clk_mp13 },
+		{ }
+	};
+
+	reset-clock-controller@58024400 {
+		compatible = "st,stm32h743-rcc\0st,stm32-rcc";
+		reg = <0x58024400 0x400>;
+		#clock-cells = <0x01>;
+		#reset-cells = <0x01>;
+		clocks = <0x18 0x19 0x1a>;
+		st,syscfg = <0x17>;
+		bootph-all;
+		phandle = <0x02>;
+	};
+	```
+- 与段中的driver结构体的of_match信息匹配,进而绑定设备
+- `device_bind_with_driver_data`绑定设备到父节点并传入驱动数据`driver_data`,分配设备私有数据的空间大小,绑定fdt的node信息
+- 并且与uclass,与父设备进行绑定
+- 将初始化的name替换为FDT中的name
+
+##### dm_scan_fdt_ofnode_path 扫描`chosen`、`clocks`、`firmware`、`reserved-memory`节点并绑定设备到根节点
+#### dm_scan_other boot/bootstd-uclass.c ,用于bootmethod
+## dm_autoprobe 绑定后探测根节点下的子设备和子设备的子设备
+
+## device flag 说明
+```c
+// probe 后设置,表示设备已经激活
+#define DM_FLAG_ACTIVATED		(1 << 0)
+
+// 表示是 malloc 分配的设备私有数据,需要在设备移除时释放
+#define DM_FLAG_ALLOC_PDATA		(1 << 1)
+
+// 表示设备在重定位之前绑定,没有这个标志的设备在重定位之后绑定
+#define DM_FLAG_PRE_RELOC		(1 << 2)
+
+// DM 负责分配和释放父设备的平台数据
+#define DM_FLAG_ALLOC_PARENT_PDATA	(1 << 3)
+
+// DM 负责分配和释放 uclass 的平台数据
+#define DM_FLAG_ALLOC_UCLASS_PDATA	(1 << 4)
+
+// 分配私有 DMA 数据
+#define DM_FLAG_ALLOC_PRIV_DMA		(1 << 5)
+
+// 设备已经绑定
+#define DM_FLAG_BOUND			(1 << 6)
+
+// 设备名字是通过 malloc 分配的
+#define DM_FLAG_NAME_ALLOCED		(1 << 7)
+
+/* 设备具有由 of-platdata 提供的平台数据*/
+#define DM_FLAG_OF_PLATDATA		(1 << 8)
+
+// 设备具有活动 DMA
+#define DM_FLAG_ACTIVE_DMA		(1 << 9)
+
+/** 调用驱动 remove 函数做一些最后的配置，之前
+ * U-Boot 退出并启动作系统
+ */
+#define DM_FLAG_OS_PREPARE		(1 << 10)
+
+/* DM 不会启用/禁用与此设备对应的电源域 */
+#define DM_FLAG_DEFAULT_PD_CTRL_OFF	(1 << 11)
+
+/* Driver plat 有效。移除设备时清除 */
+#define DM_FLAG_PLATDATA_VALID		(1 << 12)
+
+/*
+ * 设备被移除，但未关闭其电源域。这可能会
+ * 是必需的，即用于引导作系统时的串行控制台 （debug） 输出。
+ */
+#define DM_FLAG_LEAVE_PD_ON		(1 << 13)
+
+/*
+ * 设备对其他设备的运行至关重要。可以删除
+ * 在移除所有常规设备后删除此设备。这很有用
+ * 例如，对于 clock，它需要在设备删除阶段处于活动状态。
+ */
+#define DM_FLAG_VITAL			(1 << 14)
+
+/* 设备绑定后必须探测 */
+#define DM_FLAG_PROBE_AFTER_BIND	(1 << 15)
+```
 
 # initf_dm
 ```c
@@ -13,7 +140,7 @@ static int initf_dm(void)
 	if (ret)
 		return ret;
 
-	ret = dm_autoprobe();	//绑定后探测所有设备
+	ret = dm_autoprobe();	//绑定后探测根节点下的子设备
 	if (ret)
 		return ret;
 
@@ -138,7 +265,7 @@ static int dm_scan(bool pre_reloc_only)
 }
 ```
 
-## dm_scan_plat 扫描段中的设备
+## dm_scan_plat 扫描段中的设备,绑定driver_info
 ```c
 int dm_scan_plat(bool pre_reloc_only)
 {
@@ -146,16 +273,14 @@ int dm_scan_plat(bool pre_reloc_only)
 }
 ```
 
-## dm_autoprobe
-## dm_probe_devices 绑定后探测所有设备
+## dm_autoprobe	绑定后探测根节点下的子设备和子设备的子设备
+## dm_probe_devices 绑定后探测节点下的子设备和子设备的子设备
 ```c
-//设备具有DM_FLAG_PROBE_AFTER_BIND标志，将在绑定后探测设备
-//扫描所有设备进行探测
 static int dm_probe_devices(struct udevice *dev)
 {
 	struct udevice *child;
 
-	if (dev_get_flags(dev) & DM_FLAG_PROBE_AFTER_BIND) {
+	if (dev_get_flags(dev) & DM_FLAG_PROBE_AFTER_BIND) {	//设备具有DM_FLAG_PROBE_AFTER_BIND标志，将在绑定后探测设备
 		int ret;
 
 		ret = device_probe(dev);
@@ -163,8 +288,9 @@ static int dm_probe_devices(struct udevice *dev)
 			return ret;
 	}
 
+	//扫描所有设备进行探测
 	list_for_each_entry(child, &dev->child_head, sibling_node)
-		dm_probe_devices(child);
+		dm_probe_devices(child);	//再次调用探测设备,递归探测执行所有子节点
 
 	return 0;
 }
@@ -181,7 +307,7 @@ int dm_extended_scan(bool pre_reloc_only)
 		"/firmware",
 		"/reserved-memory",
 	};
-
+	//扫描FDT中的节点并根据节点属性compatible信息匹配,绑定设备; 注意节点若具有`satus`属性,则值为`ok`,则才会绑定设备
 	ret = dm_scan_fdt(pre_reloc_only);	//扫描FDT中的设备并绑定到根节点
 
 	/* 有些节点本身不是设备，但可能包含一些驱动*/
@@ -193,8 +319,9 @@ int dm_extended_scan(bool pre_reloc_only)
 }
 ```
 
-## dm_scan_fdt
-## dm_scan_fdt_node 扫描FDT中的节点并根据节点属性status=ok绑定设备
+## dm_scan_fdt 扫描FDT中的设备并绑定到根节点
+## dm_scan_fdt_node 扫描FDT中的节点并根据节点compatible信息匹配,绑定设备
+- 注意节点若具有`satus`属性,则值为`ok`,则才会绑定设备
 ```c
 static int dm_scan_fdt_node(struct udevice *parent, ofnode parent_node,
 			    bool pre_reloc_only)
@@ -211,7 +338,7 @@ static int dm_scan_fdt_node(struct udevice *parent, ofnode parent_node,
 			pr_debug("   - ignoring disabled device\n");
 			continue;
 		}
-		//绑定FDT中的设备到父节点
+		//从FDT的每个节点获取compatible信息并与段中的driver结构体的of_match信息匹配,进而绑定设备
 		err = lists_bind_fdt(parent, node, NULL, NULL, pre_reloc_only);
 
 	}
@@ -279,10 +406,10 @@ static int device_bind_common(struct udevice *parent, const struct driver *drv,
 #if CONFIG_IS_ENABLED(DEVRES)
 	INIT_LIST_HEAD(&dev->devres_head);
 #endif
-
+	//绑定driver_info到plat中,一般不要使用,而是使用下方的这个函数调用
 	dev_set_plat(dev, plat);
 	dev->driver_data = driver_data;
-	dev->name = name;
+	dev->name = name;		//注意这里将初始化定义的驱动名称替换为FDT中的名称
 	dev_set_ofnode(dev, node);
 	dev->parent = parent;
 	dev->driver = drv;
@@ -351,18 +478,35 @@ int device_probe(struct udevice *dev)
 		return 0;
 
 	ret = device_notify(dev, EVT_DM_PRE_PROBE);
-	if (ret)
-		return ret;
-
 	drv = dev->driver;
-	assert(drv);
 
-	ret = device_of_to_plat(dev);				//识别设备并分配与设置平台内部的数据
-	ret = ret = uclass_pre_probe_device(dev);	//执行设备驱动的pre_probe
-	if (drv->probe) {
-		ret = drv->probe(dev);					//执行设备驱动的probe
+	ret = device_of_to_plat(dev);						//识别设备并分配与设置平台内部的数据
+
+	//在父设备上调用 probe
+	if (dev->parent) {
+		ret = device_probe(dev->parent);
+		if (dev_get_flags(dev) & DM_FLAG_ACTIVATED)
+			return 0;
 	}
-	ret = uclass_post_probe_device(dev);		//执行设备驱动的post_probe
+
+	dev_or_flags(dev, DM_FLAG_ACTIVATED);				//设置设备激活标志
+
+	ret = dev_power_domain_on(dev);						//打开电源域
+	ret = pinctrl_select_state(dev, "default");			//选择默认状态
+	ret = dev_iommu_enable(dev);						//启用IOMMU
+	ret = device_get_dma_constraints(dev);				//获取DMA约束
+
+	ret = uclass_pre_probe_device(dev);					//uclass预探测设备
+
+	ret = dev->parent->driver->child_pre_probe(dev);	//父设备的child_pre_probe
+
+	ret = clk_set_defaults(dev, CLK_DEFAULTS_PRE);		//设置默认时钟
+
+	ret = drv->probe(dev);								//调用驱动的probe函数
+	ret = uclass_post_probe_device(dev);				//uclass后探测设备
+	ret = pinctrl_select_state(dev, "default");			//选择默认状态
+
+	return ret;
 }
 ```
 
@@ -402,7 +546,7 @@ static int device_alloc_priv(struct udevice *dev)
 }
 ```
 
-## device_bind_with_driver_data 绑定设备到父节点并传入驱动数据
+## device_bind_with_driver_data 绑定设备到父节点并传入驱动数据,与fdt的node信息
 ```c
 int device_bind_with_driver_data(struct udevice *parent,
 				 const struct driver *drv, const char *name,
@@ -478,25 +622,55 @@ done:
 ## dev_set_ofnode 设置设备的ofnode
 - device_bind_common-> dev_set_ofnode;//dev_set_ofnode(dev, node);
 
-## dev_ofnode 获取设备的ofnode
+## uclass_get_device_by_phandle 通过 phandle 获取 uclass 设备并执行探测
+- 这将在 uclass 中搜索具有给定 phandle 的设备。探测设备以将其激活以供使用。
 
-## uclass_get_device_by_ofnode 根据ofnode获取设备,并执行device_probe
+## uclass_get_device_tail device_probe 该设备
+
+## uclass_find_device_by_phandle 通过 phandle 查找 uclass 设备
+- 在当前FDT节点中根据name返回器phandle,并通过phandle id查找设备
 ```c
-int uclass_get_device_by_ofnode(enum uclass_id id, ofnode node,
-				struct udevice **devp)
+int uclass_find_device_by_phandle(enum uclass_id id, struct udevice *parent,
+				  const char *name, struct udevice **devp)
+{
+	int find_phandle;
+
+	*devp = NULL;
+	find_phandle = dev_read_u32_default(parent, name, -1);
+	if (find_phandle <= 0)
+		return -ENOENT;
+
+	return uclass_find_device_by_phandle_id(id, find_phandle, devp);
+}
+```
+
+## uclass_find_device_by_phandle_id 通过 phandle id 查找 uclass 设备
+```c
+static int uclass_find_device_by_phandle_id(enum uclass_id id,
+					    uint find_phandle,
+					    struct udevice **devp)
 {
 	struct udevice *dev;
+	struct uclass *uc;
 	int ret;
 
-	log(LOGC_DM, LOGL_DEBUG, "Looking for %s\n", ofnode_get_name(node));
-	*devp = NULL;
-	ret = uclass_find_device_by_ofnode(id, node, &dev);
-	log(LOGC_DM, LOGL_DEBUG, "   - result for %s: %s (ret=%d)\n",
-	    ofnode_get_name(node), dev ? dev->name : "(none)", ret);
+	ret = uclass_get(id, &uc);	//根据id获取uclass
+	if (ret)
+		return ret;
+	//遍历uclass链表，根据phandle找到对应的设备
+	uclass_foreach_dev(dev, uc) {
+		uint phandle;
 
-	return uclass_get_device_tail(dev, ret, devp);	//执行device_probe
+		phandle = dev_read_phandle(dev);
+		//比较phandle是否一致
+		if (phandle == find_phandle) {
+			*devp = dev;
+			return 0;
+		}
+	}
+
+	return -ENODEV;
 }
-
 ```
 
 # lists.c
@@ -569,7 +743,7 @@ static int bind_drivers_pass(struct udevice *parent, bool pre_reloc_only)
 }
 ```
 
-## lists_bind_fdt 从FDT中绑定设备
+## lists_bind_fdt 从FDT的每个节点获取compatible信息并与段中的driver结构体的of_match信息匹配,进而绑定设备
 ```c
 int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
 		   struct driver *drv, bool pre_reloc_only)
@@ -630,9 +804,9 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
 		if (entry == driver + n_ents)	//没有匹配成功,继续下一个兼容字符串
 			continue;
 
-		if (pre_reloc_only) {
-			if (!ofnode_pre_reloc(node) &&
-			    !(entry->flags & DM_FLAG_PRE_RELOC)) {
+		if (pre_reloc_only) {//重定向之前必需满足的条件
+			if (!ofnode_pre_reloc(node) &&					//判断节点是否需要在重定位之前绑定
+			    !(entry->flags & DM_FLAG_PRE_RELOC)) {		//如果设备没有DM_FLAG_PRE_RELOC标志，跳过设备
 				log_debug("Skipping device pre-relocation\n");
 				return 0;
 			}
@@ -641,7 +815,7 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
 		if (entry->of_match)
 			log_debug("   - found match at driver '%s' for '%s'\n",
 				  entry->name, id->compatible);
-		//绑定设备到父节点,将匹配的兼容设备id的data传递给设备
+		//绑定设备到父节点,将匹配的兼容设备id的data传递给设备,node是FDT中的节点进行传入绑定
 		ret = device_bind_with_driver_data(parent, entry, name,
 						   id ? id->data : 0, node,
 						   &dev);
@@ -654,7 +828,7 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
 }
 ```
 
-## driver_check_compatible 检查设备是否与驱动程序兼容
+## driver_check_compatible 检查设备是否与驱动程序兼容,每个字符串需要完全匹配
 - 驱动有一个of_match数组，用于检查设备是否与驱动兼容
 - 通过比较设备的compatible字符串，判断设备是否与驱动兼容
 - 可以多个compatible字符串，只要有一个匹配即可
@@ -685,8 +859,91 @@ static int driver_check_compatible(const struct udevice_id *of_match,
 - 配置了OF_LIVE，表示设备树是动态的，可以在运行时修改
 - 否则直接从FDT中读取设备树
 
-## ofnode_first_subnode 获取第一个子节点
+## ofnode_first_subnode 获取第一个1子节点
 - 用于遍历设备树
+
+## ofnode_parse_phandle_with_args 解析node的list索引到的phandle的args返回
+```c
+struct ofnode_phandle_args {
+	ofnode node;
+	int args_count;
+	uint32_t args[OF_MAX_PHANDLE_ARGS];
+};
+ofnode_parse_phandle_with_args()
+{
+		struct fdtdec_phandle_args args;
+		int ret;
+		/*
+		* Example:
+		*
+		* phandle1: node1 {
+		*	#list-cells = <2>;
+		* }
+		*
+		* phandle2: node2 {
+		*	#list-cells = <1>;
+		* }
+		*
+		* node3 {
+		*	list = <&phandle1 1 2 &phandle2 3>;
+		* }
+		*
+		*/
+		//解析node的list_name索引到的phandle
+		ret = fdtdec_parse_phandle_with_args(ofnode_to_fdt(node),
+						     ofnode_to_offset(node),
+						     list_name, cells_name,
+						     cell_count, index, &args);
+		//解析phandle的args
+		ofnode_from_fdtdec_phandle_args(node, &args, out_args);
+}
+```
+
+
+## ofnode_pre_reloc 判断节点是否需要在重定位之前绑定
+- 具有`bootph-all`或`bootph-pre-sram`
+
+```c
+bool ofnode_pre_reloc(ofnode node)
+{
+#if defined(CONFIG_XPL_BUILD) || defined(CONFIG_TPL_BUILD)
+	/* for SPL and TPL the remaining nodes after the fdtgrep 1st pass
+	 * had property bootph-all or bootph-pre-sram/bootph-pre-ram.
+	 * They are removed in final dtb (fdtgrep 2nd pass)
+	 */
+	return true;
+#else
+	if (ofnode_read_bool(node, "bootph-all"))
+		return true;
+	if (ofnode_read_bool(node, "bootph-some-ram"))
+		return true;
+
+	/*
+	 * In regular builds individual spl and tpl handling both
+	 * count as handled pre-relocation for later second init.
+	 */
+	if (ofnode_read_bool(node, "bootph-pre-ram") ||
+	    ofnode_read_bool(node, "bootph-pre-sram"))
+		return gd->flags & GD_FLG_RELOC;
+
+	if (IS_ENABLED(CONFIG_OF_TAG_MIGRATE)) {
+		/* detect and handle old tags */
+		if (ofnode_read_bool(node, "u-boot,dm-pre-reloc") ||
+		    ofnode_read_bool(node, "u-boot,dm-pre-proper") ||
+		    ofnode_read_bool(node, "u-boot,dm-spl") ||
+		    ofnode_read_bool(node, "u-boot,dm-tpl") ||
+		    ofnode_read_bool(node, "u-boot,dm-vpl")) {
+			gd->flags |= GD_FLG_OF_TAG_MIGRATE;
+			return true;
+		}
+	}
+
+	return false;
+#endif
+}
+```
+
+## uclass_get_device_by_ofnode 根据ofnode获取uclass设备,并执行探测
 
 # fdtaddr.c
 ## dev_read_addr

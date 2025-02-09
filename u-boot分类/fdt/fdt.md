@@ -356,6 +356,19 @@ memory@c0000000 {
 
 ```
 
+## fdtdec_parse_phandle_with_args 解析phandle和参数
+- struct fdtdec_phandle_args *out_args: 输出参数
+- out_args.node:list_name的phandle索引到的节点
+- out_args.args_count:list_name的phandle索引到的节点下的cells_name属性的值
+- out_args.uint32_t args[MAX_PHANDLE_ARGS]:src_node的list_name属性的值
+```c
+int fdtdec_parse_phandle_with_args(const void *blob, int src_node,
+				   const char *list_name,
+				   const char *cells_name,
+				   int cell_count, int index,
+				   struct fdtdec_phandle_args *out_args)
+```
+
 # libfdt
 ## fdt.c
 
