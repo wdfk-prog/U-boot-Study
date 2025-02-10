@@ -223,14 +223,21 @@ dtc -I dtb -O dts -o xxx.dts xxx.dtb
 - 之前没有的设备,需要在reloc之前初始化
 - 顺序是按照FDT节点的顺序来的
 - 节点中`status`不等于`ok`的属性,不会被启动
-
+- 重定向之前的设备初始化流程
 1. soc `simple-bus`设备,该设备绑定时,会调用`simple_bus_bind`函数,绑定其下的设备
 2. timer5 `timer`设备,获取时钟频率,并初始化时钟
 	- 注意是因为重定向之前没有定时器设备,所以需要在reloc之前初始化
 	- 后面会提交patch,把systick的初始化放在这里,而不是使用timer5来初始化系统定时器
-2. syscon `syscon`设备, 获取soc的`#address-cells` 和`#size-cells`判定地址是32位还是64位;然后获取节点下的`reg`属性,获取地址和大小
+	- 这里去获取了rcc设备,并执行了probe探测;
+	- 并且获取了当前系统时钟的基准时钟的设备,并进行初始化
+	- 初始化rcc设备,需要获取`syscon`设备,并进行初始化
+3. syscon `syscon`设备, 获取soc的`#address-cells` 和`#size-cells`判定地址是32位还是64位;然后获取节点下的`reg`属性,获取地址和大小
 	- 执行regmap函数进行分配地址与大小对的映射
-3. reset-clock-controller `rcc`设备
+4. rcc reset-clock-controller `clock`设备
 	- 执行`stm32_clk_probe`进行`configure_clocks`
-4. power-config `syscon`设备
+5. clk_hse clk_lse `fixed-clock`设备,获取固定的时钟频率
+6. power-config `syscon`设备
 	- 执行regmap函数进行分配地址与大小对的映射
+7. pinctrl `pinctrl`设备
+- 重定向之后的设备初始化流程
+1. 

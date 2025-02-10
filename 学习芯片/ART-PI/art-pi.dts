@@ -39,7 +39,7 @@
 			phandle = <0x22>;
 		};
 
-		timer@40002400 {
+		lptimer1: timer@40002400 {
 			#address-cells = <0x01>;
 			#size-cells = <0x00>;
 			compatible = "st,stm32-lptimer";
@@ -67,7 +67,7 @@
 			};
 		};
 
-		spi@40003800 {
+		spi2: spi@40003800 {
 			#address-cells = <0x01>;
 			#size-cells = <0x00>;
 			compatible = "st,stm32h7-spi";
@@ -652,7 +652,7 @@
 			ranges = <0x00 0x58020000 0x3000>;
 			interrupt-parent = <0x16>;
 			st,syscfg = <0x1c 0x08>;
-			pins-are-numbered;
+			pins-are-numbered;1
 			bootph-all;
 			phandle = <0x1f>;
 
