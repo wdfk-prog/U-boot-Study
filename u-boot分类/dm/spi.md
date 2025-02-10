@@ -41,7 +41,7 @@ static int stm32_spi_of_to_plat(struct udevice *dev)
 	ret = reset_get_by_index(dev, 0, &plat->rst_ctl);
 	if (ret < 0)
 		return ret;
-
+	// 获取cs-gpios并设置GPIO的电平与方向1
 	ret = gpio_request_list_by_name(dev, "cs-gpios", plat->cs_gpios,
 					ARRAY_SIZE(plat->cs_gpios), 0);
 	if (ret < 0) {
