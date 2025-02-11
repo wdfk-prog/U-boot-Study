@@ -282,3 +282,176 @@ static int stm32_spi_get_fifo_size(struct udevice *dev)
 	return count;
 }
 ```
+
+## stm32_spi_remove 卸载spi设备
+```c
+static int stm32_spi_remove(struct udevice *dev)
+{
+	struct stm32_spi_plat *plat = dev_get_plat(dev);
+	void __iomem *base = plat->base;
+	int ret;
+
+	stm32_spi_stopxfer(dev);
+	stm32_spi_disable(base);
+
+	ret = reset_assert(&plat->rst_ctl);
+	if (ret < 0)
+		return ret;
+
+	reset_free(&plat->rst_ctl);
+
+	return clk_disable(&plat->clk);
+};
+```
+
+## stm32_spi_set_speed 设置spi的速度
+## stm32_spi_set_mode 设置spi的模式
+## stm32_spi_claim_bus 使能spi
+```c
+static int stm32_spi_claim_bus(struct udevice *slave)
+{
+	struct udevice *bus = dev_get_parent(slave);
+	struct stm32_spi_plat *plat = dev_get_plat(bus);
+	void __iomem *base = plat->base;
+
+	dev_dbg(slave, "\n");
+
+	/* Enable the SPI hardware */
+	return stm32_spi_enable(base);
+}
+```
+
+# sf_probe.c
+1. spi_child_post_bind 子节点绑定到总线时,获取了spi设备的属性
+- 如`spi-max-frequency`, `spi-cpol`, `spi-cpha`, `spi-cs-high`, `spi-3wire`, `spi-half-duplex`, `spi-tx-bus-width`, `spi-rx-bus-width`
+- cs-gpios地址
+
+## 驱动信息
+```c
+static const struct udevice_id spi_flash_std_ids[] = {
+	{ .compatible = "jedec,spi-nor" },
+	{ }
+};
+
+U_BOOT_DRIVER(jedec_spi_nor) = {
+	.name		= "jedec_spi_nor",
+	.id		= UCLASS_SPI_FLASH,
+	.of_match	= spi_flash_std_ids,
+	.probe		= spi_flash_std_probe,
+	.remove		= spi_flash_std_remove,
+	.priv_auto	= sizeof(struct spi_nor),
+	.ops		= &spi_flash_std_ops,
+	.flags		= DM_FLAG_OS_PREPARE,
+};
+```
+
+## spi_flash_std_probe 绑定spi设备到spi总线
+```c
+int spi_flash_std_probe(struct udevice *dev)
+{
+	struct spi_slave *slave = dev_get_parent_priv(dev);
+	struct spi_flash *flash;
+
+	flash = dev_get_uclass_priv(dev);
+	flash->dev = dev;
+	flash->spi = slave;
+	return spi_flash_probe_slave(flash);
+}
+```
+
+## spi_flash_probe_slave 初始化SPI设备,并执行SFDP协议通信初始化SPI FLASH
+```c
+static int spi_flash_probe_slave(struct spi_flash *flash)
+{
+	struct spi_slave *spi = flash->spi;
+	int ret;
+
+	/* Setup spi_slave */
+	if (!spi) {
+		printf("SF: Failed to set up slave\n");
+		return -ENODEV;
+	}
+
+	/* 获取spi bus, 并设置spi的速度与模式 */
+	ret = spi_claim_bus(spi);
+	if (ret) {
+		debug("SF: Failed to claim SPI bus: %d\n", ret);
+		return ret;
+	}
+	/*
+		读取spi设备的id
+		调用 spi_nor_init_params 解析串行闪存可发现参数表（SFDP）
+		根据 info 的标志设置 nor 的标志，并根据 params 设置 nor 的页面大小和 mtd 的写缓冲区大小
+		调用 spi_nor_setup 配置 SPI 闪存设备，包括选择操作码、设置虚拟周期和 SPI 协议等
+		根据闪存设备的地址宽度和大小设置 nor 的地址宽度
+		调用 spi_nor_init 发送所有必要的 SPI 闪存命令以初始化设备
+	*/
+	ret = spi_nor_scan(flash);	
+	if (ret)
+		goto err_read_id;
+
+	if (CONFIG_IS_ENABLED(SPI_DIRMAP)) {
+		ret = spi_nor_create_read_dirmap(flash);
+		if (ret)
+			return ret;
+
+		ret = spi_nor_create_write_dirmap(flash);
+		if (ret)
+			return ret;
+	}
+
+	if (CONFIG_IS_ENABLED(SPI_FLASH_MTD))
+		ret = spi_flash_mtd_register(flash);
+
+err_read_id:
+	spi_release_bus(spi);
+	return ret;
+}
+```
+
+## spi_claim_bus 获取spi总线,并设置spi的速度与模式
+```c
+int spi_claim_bus(struct spi_slave *slave)
+{
+	//在执行spi_child_pre_probe时,将spi_slave的dev指向了spi设备
+	return log_ret(dm_spi_claim_bus(slave->dev));
+}
+```
+## dm_spi_claim_bus 获取spi总线,并设置spi的速度与模式
+- 总线与设备的速度与模式不一致时,设置总线的速度与模式
+```c
+int dm_spi_claim_bus(struct udevice *dev)
+{
+	struct udevice *bus = dev->parent;
+	struct dm_spi_ops *ops = spi_get_ops(bus);
+	struct dm_spi_bus *spi = dev_get_uclass_priv(bus);
+	struct spi_slave *slave = dev_get_parent_priv(dev);
+	uint speed, mode;
+
+	speed = slave->max_hz;
+	mode = slave->mode;
+
+	if (spi->max_hz) {
+		if (speed)
+			speed = min(speed, spi->max_hz);
+		else
+			speed = spi->max_hz;
+	}
+	if (!speed)
+		speed = SPI_DEFAULT_SPEED_HZ;
+
+	if (speed != spi->speed || mode != spi->mode) {
+		int ret = spi_set_speed_mode(bus, speed, slave->mode);
+
+		if (ret)
+			return log_ret(ret);
+
+		spi->speed = speed;
+		spi->mode = mode;
+	}
+
+	return log_ret(ops->claim_bus ? ops->claim_bus(dev) : 0);
+}
+```
+
+## mtd/spi/spi-nor-core.c (过于细节,不做分析)

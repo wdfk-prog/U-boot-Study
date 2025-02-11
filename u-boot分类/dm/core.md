@@ -9,7 +9,7 @@
 - 总结如下:
 	- 扫描FDT的设备并与driver的compatible匹配后,进行绑定与挂载到父设备与根节点上
 	- 使用malloc分配设备使用的私有数据,并设置设备的driver_data
-	- 绑定后执行设备识别`device_probe`函数,顺序根据注册的顺序执行,注册顺序为FDT节点的顺序;
+	- 绑定后执行设备识别`device_probe`函数,顺序根据注册的顺序执行,注册顺序为FDT节点的顺序;1
 - 设备绑定分为重定向之前绑定和重定向之后绑定,
 	1. 重定向之前需要绑定的设备FDT节点中需要具有`bootph-all`或`bootph-some-ram`,`bootph-pre-ram`,`bootph-pre-sram`属性,且设备驱动信息flag中需要有`DM_FLAG_PRE_RELOC`标志
 	2. 否则都是重定向之后绑定
@@ -125,7 +125,41 @@ U_BOOT_DRVINFO(button_kbd) = {
 
 /* 设备绑定后必须探测 */
 #define DM_FLAG_PROBE_AFTER_BIND	(1 << 15)
+
+/*
+ * 这些标志中的一个或多个被传递给 device_remove（），以便
+ * 由 remove-stage 指定的选择性设备删除，并且
+ * 可以进行驱动程序标记。
+ *
+ * 不要在驱动程序的 @flags 值中使用这些标志...
+ * 使用上述DM_FLAG_...值
+ */
+enum {
+	/* 正常删除、删除所有设备*/
+	DM_REMOVE_NORMAL	= 1 << 0,
+
+	/* 删除具有活动 DMA 的设备*/
+	DM_REMOVE_ACTIVE_DMA	= DM_FLAG_ACTIVE_DMA,
+
+	/* 删除需要一些最终 OS 准备步骤的设备*/
+	DM_REMOVE_OS_PREPARE	= DM_FLAG_OS_PREPARE,
+
+	/* 仅删除未标记为 Vital 的设备 */
+	DM_REMOVE_NON_VITAL	= DM_FLAG_VITAL,
+
+	/* Remove devices with any active flag */
+	DM_REMOVE_ACTIVE_ALL	= DM_REMOVE_ACTIVE_DMA | DM_REMOVE_OS_PREPARE,
+
+	/*不要关闭任何连接的电源域*/
+	DM_REMOVE_NO_PD		= 1 << 1,
+};
 ```
+
+# 驱动卸载流程
+## bootm时跳转前执行
+- arch/arm/lib/bootm.c -> announce_and_cleanup() -> dm_remove_devices_active
+## dm_remove_devices_active 移除所有激活的设备
+## device_remove
 
 # initf_dm
 ```c
@@ -343,6 +377,16 @@ static int dm_scan_fdt_node(struct udevice *parent, ofnode parent_node,
 
 	}
 	return ret;
+}
+```
+
+## ## dm_remove_devices_active 移除所有激活的设备
+```c
+void dm_remove_devices_active(void)
+{
+	/* Remove non-vital devices first */
+	device_remove(dm_root(), DM_REMOVE_ACTIVE_ALL | DM_REMOVE_NON_VITAL);
+	device_remove(dm_root(), DM_REMOVE_ACTIVE_ALL);
 }
 ```
 
@@ -953,3 +997,138 @@ bool ofnode_pre_reloc(ofnode node)
 ## fdtdec_get_addr_size_auto_parent FDT中获取节点获取reg的地址和大小
 - 通过解析提供的父节点的 `#address-cells` 和 `#size-cells` 属性，自动确定用于表示地址和大小的单元格数。
 - 解析`reg`确定reg的地址和大小
+
+# device-remove.c
+## device_remove 移除设备
+```c
+int device_remove(struct udevice *dev, uint flags)
+{
+	const struct driver *drv;
+	int ret;
+
+	if (!dev)
+		return -EINVAL;
+
+	if (!(dev_get_flags(dev) & DM_FLAG_ACTIVATED))	//没激活的设备不需要移除
+		return 0;
+
+	ret = device_notify(dev, EVT_DM_PRE_REMOVE);
+	if (ret)
+		return ret;
+
+	/*
+	 * 如果子项返回 EKEYREJECTED，请继续。它只是意味着它
+	 * 不匹配标志。
+	 */
+	ret = device_chld_remove(dev, NULL, flags);
+	if (ret && ret != -EKEYREJECTED)
+		return ret;
+
+	/*
+	 * 如果在设置了 “normal” remove 标志的情况下调用设备，则删除设备，
+	 * 或者如果 remove 标志与任何驱动程序 remove 标志匹配
+	 */
+	drv = dev->driver;
+	assert(drv);
+	ret = flags_remove(flags, drv->flags);	//判断设备属性是否允许移除
+	if (ret) {
+		log_debug("%s: When removing: flags=%x, drv->flags=%x, err=%d\n",
+			  dev->name, flags, drv->flags, ret);
+		return ret;
+	}
+
+	ret = uclass_pre_remove_device(dev);
+	if (ret)
+		return ret;
+
+	if (drv->remove) {
+		ret = drv->remove(dev);
+		if (ret)
+			goto err_remove;
+	}
+
+	if (dev->parent && dev->parent->driver->child_post_remove) {
+		ret = dev->parent->driver->child_post_remove(dev);
+		if (ret) {
+			dm_warn("%s: Device '%s' failed child_post_remove()",
+				__func__, dev->name);
+		}
+	}
+
+	if (!(flags & DM_REMOVE_NO_PD) &&
+	    !(drv->flags &
+	      (DM_FLAG_DEFAULT_PD_CTRL_OFF | DM_FLAG_LEAVE_PD_ON)) &&
+	    dev != gd->cur_serial_dev)
+		dev_power_domain_off(dev);
+
+	device_free(dev);
+
+	dev_bic_flags(dev, DM_FLAG_ACTIVATED);
+
+	ret = device_notify(dev, EVT_DM_POST_REMOVE);
+	if (ret)
+		goto err_remove;
+
+	return 0;
+
+err_remove:
+	/* We can't put the children back */
+	dm_warn("%s: Device '%s' failed to remove, but children are gone\n",
+		__func__, dev->name);
+
+	return ret;
+}
+```
+
+## device_chld_remove 移除设备下的子设备
+```c
+int device_chld_remove(struct udevice *dev, struct driver *drv,
+		       uint flags)
+{
+	struct udevice *pos, *n;
+	int result = 0;
+
+	assert(dev);
+
+	device_foreach_child_safe(pos, n, dev) {
+		int ret;
+
+		if (drv && (pos->driver != drv))
+			continue;
+
+		ret = device_remove(pos, flags);
+		if (ret == -EPROBE_DEFER)
+			result = ret;
+		else if (ret && ret != -EKEYREJECTED)
+			return ret;
+	}
+
+	return result;
+}
+```
+
+## flags_remove 判断设备属性是否允许移除
+- 具有`DM_REMOVE_NORMAL`标志的正常设备,允许进行卸载
+- 具有活动 DMA 的设备(`DM_REMOVE_ACTIVE_DMA	= DM_FLAG_ACTIVE_DMA`) 和跳转APP所需要的活动设备(`DM_REMOVE_OS_PREPARE	= DM_FLAG_OS_PREPARE`)，不允许卸载;返回`-EKEYREJECTED`
+- 具有标记为 Vital 的设备(`DM_REMOVE_NON_VITAL	= DM_FLAG_VITAL,`),不允许卸载;返回`-EPROBE_DEFER`
+
+```c
+static int flags_remove(uint flags, uint drv_flags)
+{
+	if (!(flags & DM_REMOVE_NORMAL)) {
+		bool vital_match;
+		bool active_match;
+
+		active_match = !(flags & DM_REMOVE_ACTIVE_ALL) ||
+			(drv_flags & flags);
+		vital_match = !(flags & DM_REMOVE_NON_VITAL) ||
+			!(drv_flags & DM_FLAG_VITAL);
+		if (!vital_match)
+			return -EPROBE_DEFER;
+		if (!active_match)
+			return -EKEYREJECTED;
+	}
+
+	return 0;
+}
+```

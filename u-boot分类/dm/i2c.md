@@ -59,6 +59,26 @@ static int i2c_post_probe(struct udevice *dev)
 ```
 
 ## i2c_child_post_bind 
+## i2c_chip_of_to_plat 设置i2c的地址与偏移
+```c
+int i2c_chip_of_to_plat(struct udevice *dev, struct dm_i2c_chip *chip)
+{
+	int addr;
+
+	chip->offset_len = dev_read_u32_default(dev, "u-boot,i2c-offset-len",
+						1);
+	chip->flags = 0;
+	addr = dev_read_u32_default(dev, "reg", -1);
+	if (addr == -1) {
+		debug("%s: I2C Node '%s' has no 'reg' property %s\n", __func__,
+		      dev_read_name(dev), dev->name);
+		return log_ret(-EINVAL);
+	}
+	chip->chip_addr = addr;
+
+	return 0;
+}
+```
 
 ## dm_i2c_set_bus_speed 设置i2c的速率
 
