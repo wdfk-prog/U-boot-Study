@@ -303,6 +303,28 @@ unsigned long gpio_flags_xlate(uint32_t arg)
 #define GPIO_PULL_DISABLE 64
 ```
 
+## include/asm-generic/gpio.h GPIO说明
+- GPIOD_MASK_DIR: 设置GPIO方向,注意其中不包括`GPIOD_ACTIVE_LOW`
+- 所以设置`GPIOD_ACTIVE_LOW`和没有`GPIOD_ACTIVE_LOW`,其实是设置激活电平,并不设置方向与模式
+
+```c
+#define GPIOD_IS_OUT		BIT(1)	/* GPIO is an output */
+#define GPIOD_IS_IN		BIT(2)	/* GPIO is an input */
+#define GPIOD_ACTIVE_LOW	BIT(3)	/* GPIO is active when value is low */
+#define GPIOD_IS_OUT_ACTIVE	BIT(4)	/* set output active */
+#define GPIOD_OPEN_DRAIN	BIT(5)	/* GPIO is open drain type */
+#define GPIOD_OPEN_SOURCE	BIT(6)	/* GPIO is open source type */
+#define GPIOD_PULL_UP		BIT(7)	/* GPIO has pull-up enabled */
+#define GPIOD_PULL_DOWN		BIT(8)	/* GPIO has pull-down enabled */
+#define GPIOD_IS_AF		BIT(9)	/* GPIO is an alternate function */
+
+/* Flags for updating the above */
+#define GPIOD_MASK_DIR		(GPIOD_IS_OUT | GPIOD_IS_IN | \
+					GPIOD_IS_OUT_ACTIVE)
+#define GPIOD_MASK_DSTYPE	(GPIOD_OPEN_DRAIN | GPIOD_OPEN_SOURCE)
+#define GPIOD_MASK_PULL		(GPIOD_PULL_UP | GPIOD_PULL_DOWN)
+```
+
 ### dm_gpio_requestf 通过字符串请求GPIO,并设置GPIO已经被占用,设置GPIO名字
 ```c
 // ret = dm_gpio_requestf(desc, add_index ? "%s.%s%d" : "%s.%s", nodename, list_name, index); 传入spi2.cs0

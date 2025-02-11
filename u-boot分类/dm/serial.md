@@ -1,9 +1,11 @@
 [TOC]
 
 # serial-uclass.c
-## serial_init
-- `board_f.c`中调用`serial_init`
-- `board_r.c`中调用`serial_initialize`
+## serial_init 初始化串口
+- 注意DM已初始化完成
+
+- serial_init 在relocation前调用
+- serial_initialize 在relocation后调用
 
 ```c
 /* Called after relocation */
@@ -20,7 +22,43 @@ int serial_initialize(void)
 
 	return serial_init();
 }
+```
 
+```c
+/* Called prior to relocation */
+int serial_init(void)
+{
+#if CONFIG_IS_ENABLED(SERIAL_PRESENT)
+	serial_find_console_or_panic();
+	gd->flags |= GD_FLG_SERIAL_READY;
+
+	if (IS_ENABLED(CONFIG_OF_SERIAL_BAUD)) {	//从FDT中更新波特率到env中
+		int ret = 0;
+		char *ptr = (char*)&default_environment[0];
+
+		/*
+		 * Fetch the baudrate from the dtb and update the value in the
+		 * default environment.
+		 */
+		ret = fetch_baud_from_dtb();
+		if (ret != -EINVAL && ret != -EFAULT) {
+			gd->baudrate = ret;
+
+			while (*ptr != '\0' && *(ptr + 1) != '\0')
+				ptr++;
+			ptr += 2;
+			sprintf(ptr, "baudrate=%d", gd->baudrate);
+		}
+	}
+	serial_setbrg();
+#endif
+
+	return 0;
+}
+```
+
+## serial_find_console_or_panic 查找控制台设备
+```c
 static void serial_find_console_or_panic(void)
 {
 	const void *blob = gd->fdt_blob;
@@ -38,11 +76,11 @@ static void serial_find_console_or_panic(void)
 	} else if (CONFIG_IS_ENABLED(OF_CONTROL) && blob) {
 		/* 分层树支持 stdout */
 		if (of_live_active()) {
-			struct device_node *np = of_get_stdout();
+			struct device_node *np = of_get_stdout();	//获取chosen的stdout节点
 
 			if (np && !uclass_get_device_by_ofnode(UCLASS_SERIAL,
 					np_to_ofnode(np), &dev)) {
-				gd->cur_serial_dev = dev;   //找到stdout设备
+				gd->cur_serial_dev = dev;   //找到stdout设备作为当前的串口设备
 				return;
 			}
 		} else {
@@ -214,7 +252,7 @@ U_BOOT_DRIVER(serial_stm32) = {
 - 在device_probe时通过device_of_to_plat调用执行
 - 获取串口设备的寄存器地址给到plat->base
 
-## stm32_serial_probe
+## stm32_serial_probe 使能时钟,复位,启用fifo与tx rx
 ```c
 static int stm32_serial_probe(struct udevice *dev)
 {
@@ -246,9 +284,9 @@ static int stm32_serial_probe(struct udevice *dev)
 				16 * ONE_BYTE_B115200_US, plat->base + ISR_OFFSET(stm32f4));
 	if (ret)
 		dev_dbg(dev, "FIFO not empty, some character can be lost (%d)\n", ret);
-
+	//获取reset设备
 	ret = reset_get_by_index(dev, 0, &reset);
-	if (!ret) {
+	if (!ret) {	//获取到则执行复位
 		reset_assert(&reset);
 		udelay(2);
 		reset_deassert(&reset);
@@ -263,5 +301,23 @@ static int stm32_serial_probe(struct udevice *dev)
 	_stm32_serial_init(plat->base, plat->uart_info);
 
 	return 0;
+}
+```
+
+## _stm32_serial_init 初始化串口 启用fifo与tx rx
+```c
+static void _stm32_serial_init(void __iomem *base,
+			       struct stm32_uart_info *uart_info)
+{
+	bool stm32f4 = uart_info->stm32f4;
+	u8 uart_enable_bit = uart_info->uart_enable_bit;
+
+	/* Disable uart-> enable fifo -> enable uart */
+	clrbits_le32(base + CR1_OFFSET(stm32f4), USART_CR1_RE | USART_CR1_TE |
+		     BIT(uart_enable_bit));
+	if (uart_info->has_fifo)
+		setbits_le32(base + CR1_OFFSET(stm32f4), USART_CR1_FIFOEN);
+	setbits_le32(base + CR1_OFFSET(stm32f4), USART_CR1_RE | USART_CR1_TE |
+		     BIT(uart_enable_bit));
 }
 ```

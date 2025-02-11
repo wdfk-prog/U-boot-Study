@@ -64,6 +64,10 @@ static int reset_get_by_index_tail(int ret, ofnode node,
 }
 ```
 
+## reset_assert && reset_deassert
+- reset_assert: 置位复位信号
+- reset_deassert: 清除复位信号
+
 # stm32-reset.c
 ## 驱动信息
 ```c
@@ -89,6 +93,51 @@ static int stm32_reset_probe(struct udevice *dev)
 		if (priv->base == FDT_ADDR_T_NONE)
 			return -EINVAL;
 	}
+
+	return 0;
+}
+```
+
+## stm32_reset_assert && stm32_reset_deassert
+```c
+static int stm32_reset_assert(struct reset_ctl *reset_ctl)
+{
+	struct stm32_reset_priv *priv = dev_get_priv(reset_ctl->dev);
+	int bank = (reset_ctl->id / (sizeof(u32) * BITS_PER_BYTE)) * 4;
+	int offset = reset_ctl->id % (sizeof(u32) * BITS_PER_BYTE);
+
+	dev_dbg(reset_ctl->dev, "reset id = %ld bank = %d offset = %d)\n",
+		reset_ctl->id, bank, offset);
+
+	if (dev_get_driver_data(reset_ctl->dev) == STM32MP1)
+		if (bank != RCC_MP_GCR_OFFSET)
+			/* reset assert is done in rcc set register */
+			writel(BIT(offset), priv->base + bank);
+		else
+			clrbits_le32(priv->base + bank, BIT(offset));
+	else
+		setbits_le32(priv->base + bank, BIT(offset));
+
+	return 0;
+}
+
+static int stm32_reset_deassert(struct reset_ctl *reset_ctl)
+{
+	struct stm32_reset_priv *priv = dev_get_priv(reset_ctl->dev);
+	int bank = (reset_ctl->id / (sizeof(u32) * BITS_PER_BYTE)) * 4;
+	int offset = reset_ctl->id % (sizeof(u32) * BITS_PER_BYTE);
+
+	dev_dbg(reset_ctl->dev, "reset id = %ld bank = %d offset = %d)\n",
+		reset_ctl->id, bank, offset);
+
+	if (dev_get_driver_data(reset_ctl->dev) == STM32MP1)
+		if (bank != RCC_MP_GCR_OFFSET)
+			/* reset deassert is done in rcc clr register */
+			writel(BIT(offset), priv->base + bank + RCC_CL);
+		else
+			setbits_le32(priv->base + bank, BIT(offset));
+	else
+		clrbits_le32(priv->base + bank, BIT(offset));
 
 	return 0;
 }

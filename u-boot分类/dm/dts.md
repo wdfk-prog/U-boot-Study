@@ -240,4 +240,5 @@ dtc -I dtb -O dts -o xxx.dts xxx.dtb
 	- 执行regmap函数进行分配地址与大小对的映射
 7. pinctrl `pinctrl`设备
 - 重定向之后的设备初始化流程
-1. 
+1. spi2 `spi`设备,由于status不等于ok,所以不会被启动
+2. spi3 `spi`设备,由于status不等于ok,所以不会被启动
