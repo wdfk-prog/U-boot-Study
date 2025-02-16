@@ -679,3 +679,21 @@ void clk_fixed_rate_ofdata_to_plat_(struct udevice *dev,
 		};
 	};
 ```
+
+# log
+```log
+//clk_get_by_index->clk_get_by_index_nodev
+uclass_get_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode()       - checking reset-clock-controller@58024400
+uclass_find_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 
+uclass_get_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 (ret=0)
+device_probe() probing reset-clock-controller@58024400 flag 0x1041
+stm32_clk_of_xlate() stm32h7_rcc_clock reset-clock-controller@58024400: clk->id 33
+stm32_clk_enable() stm32h7_rcc_clock reset-clock-controller@58024400: clkid=33 gate offset=0xe0 
+gpio_stm32 gpio@58020c00: clock enabled
+alloc_simple() size=40, ptr=b2c, limit=2000: 2403eaec
+alloc_simple() size=4, ptr=b30, limit=2000: 2403eb2c
+alloc_simple() size=6, ptr=b36, limit=2000: 2403eb30
+stm32_pinctrl_config() rv = 0
+```

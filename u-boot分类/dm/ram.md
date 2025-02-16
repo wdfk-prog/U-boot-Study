@@ -138,3 +138,139 @@ static int stm32_fmc_of_to_plat(struct udevice *dev)
 	return 0;
 }
 ```
+
+## stm32_fmc_probe 
+1. 使能时钟
+2. 初始化sdram
+```c
+static int stm32_fmc_probe(struct udevice *dev)
+{
+	struct stm32_sdram_params *params = dev_get_plat(dev);
+	int ret;
+	fdt_addr_t addr;
+
+	addr = dev_read_addr(dev);
+	if (addr == FDT_ADDR_T_NONE)
+		return -EINVAL;
+
+	params->base = (struct stm32_fmc_regs *)addr;
+	params->family = dev_get_driver_data(dev);
+
+#ifdef CONFIG_CLK
+	struct clk clk;
+
+	ret = clk_get_by_index(dev, 0, &clk);
+	if (ret < 0)
+		return ret;
+
+	ret = clk_enable(&clk);
+
+	if (ret) {
+		dev_err(dev, "failed to enable clock\n");
+		return ret;
+	}
+#endif
+	ret = stm32_sdram_init(dev);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+```
+
+##  pinctrl_select_state(dev, "default")
+```c
+//pinctrl_select_state_simple(dev, "default");
+```
+
+
+# log
+```log
+//-----------------fmc device_probe---------------------
+DRAM: device_probe() probing fmc@52004000 flag 0x42
+device_probe() probing driver stm32_fmc for fmc@52004000 uclass ram
+stm32_fmc fmc@52004000: can't find syscon device (-2)
+//-----------------stm32_fmc_of_to_plat---------------------
+stm32_fmc_of_to_plat() Find bank 0 0
+//-----------------stm32_sdram_init---------------------
+ofnode_read_u32_index() ofnode_read_u32_index: st,sdram-refcount: 0x2a5 (677)
+stm32_fmc fmc@52004000: no of banks = 1
+device_probe() probing parent soc for fmc@52004000
+device_probe() probing soc flag 0x1051
+//-----------------fmc pinctrl_select_state---------------------
+device_probe() probing pinctrl for fmc@52004000
+uclass_find_device_by_seq() 0
+uclass_find_device_by_seq()    - 0 'pinctrl@58020000'
+uclass_find_device_by_seq()    - found
+device_probe() probing pinctrl@58020000 flag 0x1041
+pinctrl_stm32 pinctrl@58020000: periph->name = fmc@52004000
+ofnode_read_prop() ofnode_read_prop: pinmux: No of pinmux entries= 39
+ofnode_read_u32_array() ofnode_read_u32_array: pinmux: pinmux = 300d
+drivers/pinctrl/pinctrl_stm32.c:318-       prep_gpio_dsc() GPIO:port= 3, pin= 0
+ofnode_read_u32_index() ofnode_read_u32_index: slew-rate: 0x3 (3)
+ofnode_read_bool() ofnode_read_bool: drive-open-drain: false
+ofnode_read_bool() ofnode_read_bool: bias-pull-up: false
+ofnode_read_bool() ofnode_read_bool: bias-pull-down: false
+prep_gpio_ctl() gpio fn= 13, slew-rate= 3, op type= 0, pull-upd is = 0
+uclass_find_device_by_seq() 3
+uclass_find_device_by_seq()    - 0 'gpio@58020000'
+uclass_find_device_by_seq()    - 1 'gpio@58020400'
+uclass_find_device_by_seq()    - 2 'gpio@58020800'
+uclass_find_device_by_seq()    - 3 'gpio@58020c00'
+uclass_find_device_by_seq()    - found
+device_probe() probing gpio@58020c00 flag 0x40
+device_probe() probing driver gpio_stm32 for gpio@58020c00 uclass gpio
+alloc_simple() size=8, ptr=ad8, limit=2000: 2403ead0
+alloc_simple() size=14, ptr=aec, limit=2000: 2403ead8
+device_probe() probing parent pinctrl@58020000 for gpio@58020c00
+device_probe() probing pinctrl@58020000 flag 0x1041
+device_probe() probing pinctrl for gpio@58020c00
+uclass_find_device_by_seq() 0
+uclass_find_device_by_seq()    - 0 'pinctrl@58020000'
+uclass_find_device_by_seq()    - found
+device_probe() probing pinctrl@58020000 flag 0x1041
+device_probe() Device 'gpio@58020c00' failed to configure default pinctrl: -22 ()
+//-----------------GPIO D段 控制-----------------------------
+ofnode_read_prop() ofnode_read_prop: st,bank-name: GPIOD
+gpio_stm32 gpio@58020c00: addr = 0x58020c00 bank_name = GPIOD gpio_count = 16 gpio_range = 0xffff
+uclass_get_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode()       - checking reset-clock-controller@58024400
+uclass_find_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 (ret=0)
+drivers/core/uclass.c:551-uclass_get_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 (ret=0)
+device_probe() probing reset-clock-controller@58024400 flag 0x1041
+stm32_clk_of_xlate() stm32h7_rcc_clock reset-clock-controller@58024400: clk->id 33
+stm32_clk_enable() stm32h7_rcc_clock reset-clock-controller@58024400: clkid=33 gate offset=0xe0 bit_index=3 name=gpiod
+gpio_stm32 gpio@58020c00: clock enabled
+alloc_simple() size=40, ptr=b2c, limit=2000: 2403eaec
+alloc_simple() size=4, ptr=b30, limit=2000: 2403eb2c
+alloc_simple() size=6, ptr=b36, limit=2000: 2403eb30
+stm32_pinctrl_config() rv = 0
+//-----------------fmc 的 pin 控制-----------------------------
+stm32_pinctrl_config() pinmux = 310d
+prep_gpio_dsc() GPIO:port= 3, pin= 1
+ofnode_read_u32_index() ofnode_read_u32_index: slew-rate: 0x3 (3)
+ofnode_read_bool() ofnode_read_bool: drive-open-drain: false
+ofnode_read_bool() ofnode_read_bool: bias-pull-up: false
+ofnode_read_bool() ofnode_read_bool: bias-pull-down: false
+prep_gpio_ctl() gpio fn= 13, slew-rate= 3, op type= 0, pull-upd is = 0
+uclass_find_device_by_seq() 3
+uclass_find_device_by_seq()    - 0 'gpio@58020000'
+uclass_find_device_by_seq()    - 1 'gpio@58020400'
+uclass_find_device_by_seq()    - 2 'gpio@58020800'
+uclass_find_device_by_seq()    - 3 'gpio@58020c00'
+uclass_find_device_by_seq()    - found
+device_probe() probing gpio@58020c00 flag 0x1041
+alloc_simple() size=6, ptr=b3e, limit=2000: 2403eb38
+stm32_pinctrl_config() rv = 0
+//-------------------------stm32_fmc_probe-----------------------------
+stm32_fmc fmc@52004000: base = 52004000
+uclass_get_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode()       - checking reset-clock-controller@58024400
+uclass_find_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 (ret=0)
+uclass_get_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 (ret=0)
+device_probe() probing reset-clock-controller@58024400 flag 0x1041
+stm32_clk_of_xlate() stm32h7_rcc_clock reset-clock-controller@58024400: clk->id 64
+stm32_clk_enable() stm32h7_rcc_clock reset-clock-controller@58024400: clkid=64 gate offset=0xd4 bit_index=12 name=fmc
+```

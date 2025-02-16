@@ -717,6 +717,51 @@ static int uclass_find_device_by_phandle_id(enum uclass_id id,
 }
 ```
 
+## uclass_get_device_by_seq 通过seq查找设备并执行探测
+```c
+int uclass_get_device_by_seq(enum uclass_id id, int seq, struct udevice **devp)
+{
+	struct udevice *dev;
+	int ret;
+
+	*devp = NULL;
+	ret = uclass_find_device_by_seq(id, seq, &dev);
+
+	return uclass_get_device_tail(dev, ret, devp);
+}
+```
+
+## uclass_find_device_by_seq 通过seq查找设备
+1. 遍历uclass链表，根据seq找到对应的设备
+```c
+int uclass_find_device_by_seq(enum uclass_id id, int seq, struct udevice **devp)
+{
+	struct uclass *uc;
+	struct udevice *dev;
+	int ret;
+
+	*devp = NULL;
+	log_debug("%d\n", seq);
+	if (seq == -1)
+		return -ENODEV;
+	ret = uclass_get(id, &uc);
+	if (ret)
+		return ret;
+
+	uclass_foreach_dev(dev, uc) {
+		log_debug("   - %d '%s'\n", dev->seq_, dev->name);
+		if (dev->seq_ == seq) {
+			*devp = dev;
+			log_debug("   - found\n");
+			return 0;
+		}
+	}
+	log_debug("   - not found\n");
+
+	return -ENODEV;
+}
+```
+
 # lists.c
 ## lists_bind_drivers 绑定段中的driver_info
 - 由于设备之间可能存在依赖关系，因此可能需要多次绑定设备

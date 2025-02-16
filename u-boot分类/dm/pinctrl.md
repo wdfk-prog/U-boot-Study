@@ -3,6 +3,37 @@
 # pinctrl-uclass.c
 ## pinctrl_post_bind 以递归方式将其子项绑定为 pinconfig属性的 设备
 
+## pinctrl_select_state pin选择状态并配置
+## pinctrl_select_state_simple pin选择状态并配置
+```c
+static int pinctrl_select_state_simple(struct udevice *dev)
+{
+	struct udevice *pctldev;
+	struct pinctrl_ops *ops;
+	int ret;
+
+	/*
+	 * 对于大多数系统，只有一个 pincontroller 设备。但在
+	 * 在多个 pincontroller 设备的情况下，探测序列
+	 * 数字 0（由 alias 定义）以避免争用条件。
+	 */
+	ret = uclass_get_device_by_seq(UCLASS_PINCTRL, 0, &pctldev);
+	if (ret)
+		/* if not found, get the first one */
+		ret = uclass_get_device(UCLASS_PINCTRL, 0, &pctldev);
+	if (ret)
+		return ret;
+
+	ops = pinctrl_get_ops(pctldev);
+	if (!ops->set_state_simple) {
+		dev_dbg(dev, "set_state_simple op missing\n");
+		return -ENOSYS;
+	}
+
+	return ops->set_state_simple(pctldev, dev);
+}
+```
+
 # pinctrl_stm32.c
 ## 驱动信息
 ```c
@@ -29,6 +60,52 @@ U_BOOT_DRIVER(pinctrl_stm32) = {
 	.probe			= stm32_pinctrl_probe,
 	.priv_auto	= sizeof(struct stm32_pinctrl_priv),
 };
+```
+
+## STM32_PINMUX 引脚宏定义
+```c
+/*  define PIN modes */
+/*
+AF0：系统功能，如事件输出、RTC 时钟输出等。
+AF1：TIM1 和 TIM2 的输入/输出。
+AF2：TIM3 到 TIM5 的输入/输出。
+AF3：TIM8 到 TIM11 的输入/输出。
+AF4：I2C1 到 I2C4 的数据和时钟线。
+AF5：SPI1、SPI2、SPI3 和 I2S 的数据和时钟线。
+AF6：SPI3 和 I2S 的数据和时钟线。
+AF7：USART1 到 USART3 的数据和控制线。
+AF8：UART4 到 UART8 的数据和控制线。
+AF9：CAN1 和 CAN2 的数据和控制线。
+AF10：USB OTG FS/HS 的数据和控制线。
+AF11：以太网的控制和数据线。
+AF12：FSMC、SDIO 和 OTG HS 的数据和控制线。
+AF13：DCMI 的数据和控制线。
+AF14：LCD 的数据和控制线。
+AF15：事件输出。
+*/
+#define GPIO	0x0
+#define AF0	0x1
+#define AF1	0x2
+#define AF2	0x3
+#define AF3	0x4
+#define AF4	0x5
+#define AF5	0x6
+#define AF6	0x7
+#define AF7	0x8
+#define AF8	0x9
+#define AF9	0xa
+#define AF10	0xb
+#define AF11	0xc
+#define AF12	0xd
+#define AF13	0xe
+#define AF14	0xf
+#define AF15	0x10
+#define ANALOG	0x11
+
+/* define Pins number*/
+#define PIN_NO(port, line)	(((port) - 'A') * 0x10 + (line))
+
+#define STM32_PINMUX(port, line, mode) (((PIN_NO(port, line)) << 8) | (mode))
 ```
 
 ## stm32_pinctrl_bind 遍历具有gpio-controller的子节点绑定gpio_stm32驱动
@@ -81,6 +158,156 @@ static int stm32_pinctrl_probe(struct udevice *dev)
 	if (ret)
 		dev_dbg(dev, "hwspinlock_get_by_index may have failed (%d)\n",
 			ret);
+
+	return 0;
+}
+```
+
+## stm32_pinctrl_set_state_simple 设置pin状态并配置
+```c
+static int stm32_pinctrl_set_state_simple(struct udevice *dev,
+					  struct udevice *periph)
+{
+	const fdt32_t *list;
+	uint32_t phandle;
+	ofnode config_node;
+	int size, i, ret;
+
+	list = ofnode_get_property(dev_ofnode(periph), "pinctrl-0", &size);
+	if (!list)
+		return -EINVAL;
+
+	dev_dbg(dev, "periph->name = %s\n", periph->name);
+
+	size /= sizeof(*list);
+	for (i = 0; i < size; i++) {
+		phandle = fdt32_to_cpu(*list++);
+
+		config_node = ofnode_get_by_phandle(phandle);
+		if (!ofnode_valid(config_node)) {
+			dev_err(periph,
+				"prop pinctrl-0 index %d invalid phandle\n", i);
+			return -EINVAL;
+		}
+
+		ret = stm32_pinctrl_config(config_node);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+```
+
+## stm32_pinctrl_config pin 配置
+1. 读取pinmux属性
+2. 读取slew-rate属性
+3. 读取drive-open-drain属性
+4. 读取bias-pull-up属性
+5. 获取GPIO设备
+6. 配置GPIO
+```c
+static int stm32_pinctrl_config(ofnode node)
+{
+	u32 pin_mux[MAX_PINS_ONE_IP];
+	int rv, len;
+	ofnode subnode;
+
+	/*
+	 * check for "pinmux" property in each subnode (e.g. pins1 and pins2 for
+	 * usart1) of pin controller phandle "pinctrl-0"
+	 * */
+	ofnode_for_each_subnode(subnode, node) {
+		struct stm32_gpio_dsc gpio_dsc;
+		struct stm32_gpio_ctl gpio_ctl;
+		int i;
+
+		rv = ofnode_read_size(subnode, "pinmux");
+		if (rv < 0)
+			return rv;
+		len = rv / sizeof(pin_mux[0]);
+		log_debug("No of pinmux entries= %d\n", len);
+		if (len > MAX_PINS_ONE_IP)
+			return -EINVAL;
+		rv = ofnode_read_u32_array(subnode, "pinmux", pin_mux, len);
+		if (rv < 0)
+			return rv;
+		for (i = 0; i < len; i++) {
+			struct gpio_desc desc;
+
+			log_debug("pinmux = %x\n", *(pin_mux + i));
+			prep_gpio_dsc(&gpio_dsc, *(pin_mux + i));			//解析GPIO描述引脚
+			prep_gpio_ctl(&gpio_ctl, *(pin_mux + i), subnode);	//解析GPIO控制模式
+			rv = uclass_get_device_by_seq(UCLASS_GPIO,			//获取GPIO设备
+						      gpio_dsc.port,
+						      &desc.dev);
+			if (rv)
+				return rv;
+			desc.offset = gpio_dsc.pin;
+			rv = stm32_gpio_config(node, &desc, &gpio_ctl);		//配置GPIO
+			log_debug("rv = %d\n\n", rv);
+			if (rv)
+				return rv;
+		}
+	}
+
+	return 0;
+}
+```
+
+## prep_gpio_dsc 解析GPIO描述引脚
+```c
+static int prep_gpio_dsc(struct stm32_gpio_dsc *gpio_dsc, u32 port_pin)
+{
+	gpio_dsc->port = (port_pin & 0x1F000) >> 12;
+	gpio_dsc->pin = (port_pin & 0x0F00) >> 8;
+	log_debug("GPIO:port= %d, pin= %d\n", gpio_dsc->port, gpio_dsc->pin);
+
+	return 0;
+}
+```
+
+## prep_gpio_ctl 解析GPIO控制模式
+```c
+static int prep_gpio_ctl(struct stm32_gpio_ctl *gpio_ctl, u32 gpio_fn,
+			 ofnode node)
+{
+	gpio_fn &= 0x00FF;
+	gpio_ctl->af = 0;
+
+	switch (gpio_fn) {
+	case 0:
+		gpio_ctl->mode = STM32_GPIO_MODE_IN;
+		break;
+	case 1 ... 16:
+		gpio_ctl->mode = STM32_GPIO_MODE_AF;
+		gpio_ctl->af = gpio_fn - 1;
+		break;
+	case 17:
+		gpio_ctl->mode = STM32_GPIO_MODE_AN;
+		break;
+	default:
+		gpio_ctl->mode = STM32_GPIO_MODE_OUT;
+		break;
+	}
+
+	gpio_ctl->speed = ofnode_read_u32_default(node, "slew-rate", 0);
+
+	if (ofnode_read_bool(node, "drive-open-drain"))
+		gpio_ctl->otype = STM32_GPIO_OTYPE_OD;
+	else
+		gpio_ctl->otype = STM32_GPIO_OTYPE_PP;
+
+	if (ofnode_read_bool(node, "bias-pull-up"))
+		gpio_ctl->pupd = STM32_GPIO_PUPD_UP;
+	else if (ofnode_read_bool(node, "bias-pull-down"))
+		gpio_ctl->pupd = STM32_GPIO_PUPD_DOWN;
+	else
+		gpio_ctl->pupd = STM32_GPIO_PUPD_NO;
+
+	log_debug("gpio fn= %d, slew-rate= %x, op type= %x, pull-upd is = %x\n",
+		  gpio_fn, gpio_ctl->speed, gpio_ctl->otype,
+		  gpio_ctl->pupd);
 
 	return 0;
 }
@@ -576,4 +803,63 @@ static int stm32_gpio_set_flags(struct udevice *dev, unsigned int offset,
 
 	return 0;
 }
+```
+
+# stm log
+```log
+//-----pinctrl_select_state_simple-> uclass_get_device_by_seq--------
+uclass_find_device_by_seq() 0
+uclass_find_device_by_seq()    - 0 'pinctrl@58020000'
+uclass_find_device_by_seq()    - found
+device_probe() probing pinctrl@58020000 flag 0x1041
+//----------------stm32_pinctrl_set_state_simple---------------------
+periph->name = fmc@52004000
+//-----------------stm32_pinctrl_config-----------------------------
+ofnode_read_prop() ofnode_read_prop: pinmux: No of pinmux entries= 39
+ofnode_read_u32_array() ofnode_read_u32_array: pinmux: pinmux = 300d
+//-----------------prep_gpio_dsc-------------------------------------
+prep_gpio_dsc() GPIO:port= 3, pin= 0
+//-----------------prep_gpio_ctl-------------------------------------
+ofnode_read_u32_index() ofnode_read_u32_index: slew-rate: 0x3 (3)
+ofnode_read_bool() ofnode_read_bool: drive-open-drain: false
+ofnode_read_bool() ofnode_read_bool: bias-pull-up: false
+ofnode_read_bool() ofnode_read_bool: bias-pull-down: false
+drivers/pinctrl/pinctrl_stm32.c:359-       prep_gpio_ctl() gpio fn= 13, slew-rate= 3, op type= 0, pull-upd is = 0
+//-----------------stm32_gpio_config GPIO(C,0)-----------------------
+uclass_find_device_by_seq() 3
+uclass_find_device_by_seq()    - 0 'gpio@58020000'
+uclass_find_device_by_seq()    - 1 'gpio@58020400'
+uclass_find_device_by_seq()    - 2 'gpio@58020800'
+uclass_find_device_by_seq()    - 3 'gpio@58020c00'
+uclass_find_device_by_seq()    - found
+device_probe() probing gpio@58020c00 flag 0x40
+device_probe() probing driver gpio_stm32 for gpio@58020c00 uclass gpio
+alloc_simple() size=8, ptr=ad8, limit=2000: 2403ead0
+alloc_simple() size=14, ptr=aec, limit=2000: 2403ead8
+device_probe() probing parent pinctrl@58020000 for gpio@58020c00
+device_probe() probing pinctrl@58020000 flag 0x1041
+device_probe() probing pinctrl for gpio@58020c00
+uclass_find_device_by_seq() 0
+uclass_find_device_by_seq()    - 0 'pinctrl@58020000'
+uclass_find_device_by_seq()    - found
+device_probe() probing pinctrl@58020000 flag 0x1041
+//-----------------uclass_get_device_by_seq---------------------------
+device_probe() Device 'gpio@58020c00' failed to configure default pinctrl: -22 ()
+//-----------------gpio_stm32_probe------------------------------
+ofnode_read_prop() ofnode_read_prop: st,bank-name: GPIOD
+gpio_stm32 gpio@58020c00: addr = 0x58020c00 bank_name = GPIOD gpio_count = 16 gpio_range = 0xffff
+//-----------------CLOCK配置----------------------------
+uclass_get_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode() Looking for reset-clock-controller@58024400
+uclass_find_device_by_ofnode()       - checking reset-clock-controller@58024400
+uclass_find_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 
+uclass_get_device_by_ofnode()    - result for reset-clock-controller@58024400: reset-clock-controller@58024400 (ret=0)
+device_probe() probing reset-clock-controller@58024400 flag 0x1041
+stm32_clk_of_xlate() stm32h7_rcc_clock reset-clock-controller@58024400: clk->id 33
+stm32_clk_enable() stm32h7_rcc_clock reset-clock-controller@58024400: clkid=33 gate offset=0xe0 
+gpio_stm32 gpio@58020c00: clock enabled
+alloc_simple() size=40, ptr=b2c, limit=2000: 2403eaec
+alloc_simple() size=4, ptr=b30, limit=2000: 2403eb2c
+alloc_simple() size=6, ptr=b36, limit=2000: 2403eb30
+stm32_pinctrl_config() rv = 0
 ```
