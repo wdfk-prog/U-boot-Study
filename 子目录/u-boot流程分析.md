@@ -115,7 +115,6 @@ static const init_fnc_t init_sequence_f[] = {
 	setup_reloc,			//计算reloc_off和拷贝gd到new_gd
 ```
 
-
 # relocate_code 重新定位代码
 - relocate_code 函数,用于重新定位代码
 - 在 U-Boot 启动过程中，重定位是一个关键步骤，它将 U-Boot 从加载地址移动到运行地址，并修正所有相关的地址引用。
