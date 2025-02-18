@@ -24,7 +24,7 @@ make -j 12
 ```sh
 export CROSS_COMPILE=arm-none-eabi- ARCH=arm
 make stm32f429-discovery_defconfig
-arch/arm/dts/stm32f746-disco.dts
+arch/arm/dts/stm32f429-disco.dts
 make -j 12
 ```
 

@@ -1,7 +1,9 @@
 [TOC]
 
 # Kconfig
+
 ## 中断控制器
+
 ### GIC (Generic Interrupt Controller) 通用中断控制器
 - GIC 是 ARM 处理器的一种通用中断控制器，用于管理和分发中断信号。GIC 支持多种中断类型，包括外部中断、定时器中断、软件中断等。GIC 通过中断控制器和中断分配器组件实现中断的管理和分发。
 #### GICv2
