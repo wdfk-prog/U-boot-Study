@@ -898,10 +898,131 @@ error:
 }
 ```
 
-## image_setup_libfdt 将fdt转换为动态设备树
+## fdt_root 检测fdt头部,将环境变量中serial#设置到fdt中
+```c
+int fdt_root(void *fdt)
+{
+	char *serial;
+	int err;
+
+	err = fdt_check_header(fdt);
+	if (err < 0) {
+		printf("fdt_root: %s\n", fdt_strerror(err));
+		return err;
+	}
+
+	serial = env_get("serial#");	//获取环境变量serial#的值
+	if (serial) {
+		//获取serial成功后设置设备树属性
+		err = fdt_setprop(fdt, 0, "serial-number", serial,
+				  strlen(serial) + 1);
+
+		if (err < 0) {
+			printf("WARNING: could not set serial-number %s.\n",
+			       fdt_strerror(err));
+			return err;
+		}
+	}
+
+	return 0;
+}
+```
+
+## fdt_chosen 创建/chosen节点,添加bootargs属性和rng-seed属性,u-boot版本号,bootargs属性
+```c
+/**
+ * board_fdt_chosen_bootargs - 板子可以覆盖此函数以使用替代内核命令行参数
+ * 默认将env的bootargs设置到fdt中
+ */
+__weak const char *board_fdt_chosen_bootargs(const struct fdt_property *fdt_ba)
+{
+	return env_get("bootargs");
+}
+
+int fdt_chosen(void *fdt)
+{
+	struct abuf buf = {};
+	int   nodeoffset;
+	int   err;
+	const char *str;		/* used to set string properties */
+
+	err = fdt_check_header(fdt);
+	if (err < 0) {
+		printf("fdt_chosen: %s\n", fdt_strerror(err));
+		return err;
+	}
+
+	/* 查找或创建 “/Chosen” 节点。 */
+	nodeoffset = fdt_find_or_add_subnode(fdt, 0, "chosen");
+	if (nodeoffset < 0)
+		return nodeoffset;
+
+	//设置rng-seed属性
+	if (IS_ENABLED(CONFIG_BOARD_RNG_SEED) && !board_rng_seed(&buf)) {
+		err = fdt_setprop(fdt, nodeoffset, "rng-seed",
+				  abuf_data(&buf), abuf_size(&buf));
+		abuf_uninit(&buf);
+		if (err < 0) {
+			printf("WARNING: could not set rng-seed %s.\n",
+			       fdt_strerror(err));
+			return err;
+		}
+	}
+
+	//设置bootargs属性 将env的bootargs设置到fdt中
+	str = board_fdt_chosen_bootargs(fdt_get_property(fdt, nodeoffset,
+							 "bootargs", NULL));
+
+	if (str) {
+		err = fdt_setprop(fdt, nodeoffset, "bootargs", str,
+				  strlen(str) + 1);
+		if (err < 0) {
+			printf("WARNING: could not set bootargs %s.\n",
+			       fdt_strerror(err));
+			return err;
+		}
+	}
+
+	/* 添加 u-boot 版本 */
+	err = fdt_setprop(fdt, nodeoffset, "u-boot,version", PLAIN_VERSION,
+			  strlen(PLAIN_VERSION) + 1);
+	if (err < 0) {
+		printf("WARNING: could not set u-boot,version %s.\n",
+		       fdt_strerror(err));
+		return err;
+	}
+
+	return fdt_fixup_stdout(fdt, nodeoffset);
+}
+```
+
+## image_setup_libfdt 将fdt转换为动态设备树,并设置相关属性到fdt中
 ```c
 int image_setup_libfdt(struct bootm_headers *images, void *blob, bool lmb)
 {
+	ret = -EPERM;
+	//检测fdt头部,设置serial#属性
+	if (fdt_root(blob) < 0) {	
+		printf("ERROR: root node setup failed\n");
+		goto err;
+	}
+	// 创建/chosen节点,添加bootargs属性和rng-seed属性,u-boot版本号,bootargs属性
+	if (fdt_chosen(blob) < 0) {
+		printf("ERROR: /chosen node create failed\n");
+		goto err;
+	}
+	if (arch_fixup_fdt(blob) < 0) {
+		printf("ERROR: arch-specific fdt fixup failed\n");
+		goto err;
+	}
+
+	fdt_ret = optee_copy_fdt_nodes(blob);
+	if (fdt_ret) {
+		printf("ERROR: transfer of optee nodes to new fdt failed: %s\n",
+		       fdt_strerror(fdt_ret));
+		goto err;
+	}
+
 	/* 将配置节点的名称存储为 u-boot，bootconf 在 /chosen 节点中 */
 	if (images->fit_uname_cfg)
 		fdt_find_and_setprop(blob, "/chosen", "u-boot,bootconf",
