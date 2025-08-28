@@ -68,3 +68,4 @@
   - [2.8. u-boot_config.md](子目录/u-boot_config.md)
   - [2.9. u-boot_make.md](子目录/u-boot_make.md)
   - [2.10. u-boot流程分析.md](子目录/u-boot流程分析.md)
+- [3. 构建.md](构建.md)
