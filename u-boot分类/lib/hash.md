@@ -1,3 +1,15 @@
+---
+title: hash
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - lib
+tags:
+  - uboot
+  - u-boot分类
+  - lib
+---
 [TOC]
 # hash 哈希 散列
 - [给定一个键，哈希表在常数时间内返回相应的值，无论哈希表中有多少个键](https://craftinginterpreters.com/hash-tables.html)

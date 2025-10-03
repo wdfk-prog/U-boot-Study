@@ -1,3 +1,13 @@
+---
+title: u-boot_make
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - 子目录
+tags:
+  - uboot
+  - 子目录
+---
 # _all: 第一个目标 执行这个
 
 ```makefile

@@ -1,4 +1,12 @@
-﻿# u-boot 学习笔记
+---
+title: readme
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+tags:
+  - uboot
+---
+# u-boot 学习笔记
 
 - 1. [u-boot分类](u-boot分类/)
   - 1.1. [api](u-boot分类/api/)

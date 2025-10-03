@@ -1,3 +1,15 @@
+---
+title: of_live
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - lib
+tags:
+  - uboot
+  - u-boot分类
+  - lib
+---
 [TOC]
 # of_live
 - 将平面设备树转换为分层设备树,将原来紧凑的二进制设备树转换为分层的设备树,以结构体的形式存储,便于查找和操作

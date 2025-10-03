@@ -1,3 +1,13 @@
+---
+title: scripts
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - 子目录
+tags:
+  - uboot
+  - 子目录
+---
 [TOC]
 
 # scripts 用于构建脚本的工具

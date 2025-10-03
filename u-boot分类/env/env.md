@@ -1,3 +1,15 @@
+---
+title: env
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - env
+tags:
+  - uboot
+  - u-boot分类
+  - env
+---
 # env
 # U_BOOT_ENV_LOCATION
 - 通过该宏定义环境变量的位置

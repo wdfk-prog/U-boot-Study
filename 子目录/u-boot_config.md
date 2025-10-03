@@ -1,3 +1,13 @@
+---
+title: u-boot_config
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - 子目录
+tags:
+  - uboot
+  - 子目录
+---
 # last
 ## 设置编译引导加载程序
 ### VPL（Very Early Program Loader）

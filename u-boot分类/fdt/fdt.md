@@ -1,3 +1,15 @@
+---
+title: fdt
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - fdt
+tags:
+  - uboot
+  - u-boot分类
+  - fdt
+---
 # fdtdec 扁平设备树解析
 
 - [devicetree](https://docs.u-boot.org/en/latest/develop/devicetree/index.html)

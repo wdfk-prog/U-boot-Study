@@ -1,3 +1,15 @@
+---
+title: arch
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - arch
+tags:
+  - uboot
+  - u-boot分类
+  - arch
+---
 [TOC]
 
 # arch 架构介绍

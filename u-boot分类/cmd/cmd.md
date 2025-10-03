@@ -1,3 +1,15 @@
+---
+title: cmd
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - cmd
+tags:
+  - uboot
+  - u-boot分类
+  - cmd
+---
 [TOC]
 # boot 命令
 - bootm 是一个通用的引导命令，支持多种镜像格式和加载方式.

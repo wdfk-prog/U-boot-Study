@@ -1,3 +1,15 @@
+---
+title: linker_list
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - include
+tags:
+  - uboot
+  - u-boot分类
+  - include
+---
 # linker_lists.h
 
 - [linker_lists api手册](https://docs.u-boot.org/en/stable/api/linker_lists.html)

@@ -1,3 +1,15 @@
+---
+title: core
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - dm
+tags:
+  - uboot
+  - u-boot分类
+  - dm
+---
 [TOC]
 # 驱动初始化及绑定与探测流程
 1. 存储在段中的驱动设备信息

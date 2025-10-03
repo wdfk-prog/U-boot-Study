@@ -1,3 +1,13 @@
+---
+title: shell
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - 子目录
+tags:
+  - uboot
+  - 子目录
+---
 [TOC]
 # 语法
 ## if 条件语句

@@ -1,3 +1,15 @@
+---
+title: kconfig
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - include
+tags:
+  - uboot
+  - u-boot分类
+  - include
+---
 # linux/kconfig.h
 
 ## __count_args 计算可变参数宏的参数数

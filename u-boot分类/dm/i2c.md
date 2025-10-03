@@ -1,3 +1,15 @@
+---
+title: i2c
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - dm
+tags:
+  - uboot
+  - u-boot分类
+  - dm
+---
 [TOC]
 # i2c-uclass.c
 ## i2c_post_bind 扫描并绑定子节点

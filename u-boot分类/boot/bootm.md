@@ -1,3 +1,15 @@
+---
+title: bootm
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - boot
+tags:
+  - uboot
+  - u-boot分类
+  - boot
+---
 # cmd/bootm.c 从内存中的映像引导应用程序映像
 ## do_bootm
 ```c

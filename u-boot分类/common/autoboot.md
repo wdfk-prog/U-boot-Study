@@ -1,3 +1,15 @@
+---
+title: autoboot
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - common
+tags:
+  - uboot
+  - u-boot分类
+  - common
+---
 # autoboot.c
 ## autoboot_command 自动启动命令
 ```c

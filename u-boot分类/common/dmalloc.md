@@ -1,3 +1,15 @@
+---
+title: dmalloc
+date: 2025-10-03 09:44:27
+categories:
+  - uboot
+  - u-boot分类
+  - common
+tags:
+  - uboot
+  - u-boot分类
+  - common
+---
 # dlmalloc.c
 
 dlmalloc 是 Doug Lea 实现的一种动态内存分配器，广泛用于嵌入式系统和操作系统中。它以其高效和灵活的内存管理机制而著称。以下是 dlmalloc 的工作原理和关键概念：
