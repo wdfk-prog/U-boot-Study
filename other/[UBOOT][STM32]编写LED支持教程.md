@@ -1,12 +1,13 @@
 ---
 title: '[UBOOT][STM32]编写LED支持教程'
-date: 2025-10-03 10:58:03
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: 18312ec5
+date: 2025-10-03 10:58:03
 ---
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/d77ded5a221c4fe4b4a2f79d7e078d47.png)

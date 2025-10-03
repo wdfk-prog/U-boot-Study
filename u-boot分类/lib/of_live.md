@@ -1,6 +1,5 @@
 ---
 title: of_live
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - lib
+abbrlink: f637a49c
+date: 2025-10-03 09:44:27
 ---
 [TOC]
 # of_live

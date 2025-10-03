@@ -1,6 +1,5 @@
 ---
 title: image
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - boot
+abbrlink: c53d045f
+date: 2025-10-03 09:44:27
 ---
 # image-board.c
 ## genimg_get_kernel_addr_fit

@@ -1,12 +1,13 @@
 ---
 title: u-boot流程分析
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - 子目录
 tags:
   - uboot
   - 子目录
+abbrlink: ee1510ff
+date: 2025-10-03 09:44:27
 ---
 [toc]
 

@@ -1,6 +1,5 @@
 ---
 title: command
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - common
+abbrlink: 8ecaead4
+date: 2025-10-03 09:44:27
 ---
 
 # command.c

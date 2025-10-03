@@ -1,6 +1,5 @@
 ---
 title: ram
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - dm
+abbrlink: e7d1222f
+date: 2025-10-03 09:44:27
 ---
 [TOC]
 

@@ -1,6 +1,5 @@
 ---
 title: console
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - common
+abbrlink: 3603cfb6
+date: 2025-10-03 09:44:27
 ---
 ## common/console.c
 

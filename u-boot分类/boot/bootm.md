@@ -1,6 +1,5 @@
 ---
 title: bootm
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - boot
+abbrlink: 7d4e196f
+date: 2025-10-03 09:44:27
 ---
 # cmd/bootm.c 从内存中的映像引导应用程序映像
 ## do_bootm

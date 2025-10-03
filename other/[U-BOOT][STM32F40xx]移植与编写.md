@@ -1,12 +1,13 @@
 ---
 title: '[U-BOOT][STM32F40xx]移植与编写'
-date: 2025-10-03 10:56:17
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: 933f970e
+date: 2025-10-03 10:56:17
 ---
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/9930b1592746424484928bf47a510966.png)

@@ -1,12 +1,13 @@
 ---
 title: UBOOT 早期串口调试功能CONFIG_DEBUG_UART适配教程
-date: 2025-10-03 10:58:37
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: fb266f7b
+date: 2025-10-03 10:58:37
 ---
 @[toc]
 

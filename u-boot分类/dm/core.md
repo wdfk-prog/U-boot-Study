@@ -1,6 +1,5 @@
 ---
 title: core
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - dm
+abbrlink: 6b8d854f
+date: 2025-10-03 09:44:27
 ---
 [TOC]
 # 驱动初始化及绑定与探测流程

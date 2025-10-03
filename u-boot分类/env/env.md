@@ -1,6 +1,5 @@
 ---
 title: env
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - env
+abbrlink: f34542f9
+date: 2025-10-03 09:44:27
 ---
 # env
 # U_BOOT_ENV_LOCATION

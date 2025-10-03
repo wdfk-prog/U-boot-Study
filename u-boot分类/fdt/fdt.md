@@ -1,6 +1,5 @@
 ---
 title: fdt
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - fdt
+abbrlink: e5e27506
+date: 2025-10-03 09:44:27
 ---
 # fdtdec 扁平设备树解析
 

@@ -1,6 +1,5 @@
 ---
 title: bootretry
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - boot
+abbrlink: 98d8dabe
+date: 2025-10-03 09:44:27
 ---
 [TOC]
 

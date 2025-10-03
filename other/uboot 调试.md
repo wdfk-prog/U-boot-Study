@@ -1,12 +1,13 @@
 ---
 title: uboot 调试
-date: 2025-10-03 10:58:55
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: 902266d7
+date: 2025-10-03 10:58:55
 ---
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/cb100da7e2b84e7eb5d3d40f419b1049.png)

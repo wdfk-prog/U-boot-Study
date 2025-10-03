@@ -1,6 +1,5 @@
 ---
 title: autoboot
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - common
+abbrlink: 2b4b5e53
+date: 2025-10-03 09:44:27
 ---
 # autoboot.c
 ## autoboot_command 自动启动命令

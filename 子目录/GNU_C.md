@@ -1,12 +1,13 @@
 ---
 title: GNU_C
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - 子目录
 tags:
   - uboot
   - 子目录
+abbrlink: efbbe1a0
+date: 2025-10-03 09:44:27
 ---
 [TOC]
 

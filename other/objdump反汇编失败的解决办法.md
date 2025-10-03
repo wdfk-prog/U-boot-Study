@@ -1,12 +1,13 @@
 ---
 title: objdump反汇编失败的解决办法
-date: 2025-10-03 11:00:03
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: '8e01160'
+date: 2025-10-03 11:00:03
 ---
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/04e777a8e38d49739fd37d4bcf1a180e.png)
 

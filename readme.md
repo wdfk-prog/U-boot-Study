@@ -1,11 +1,12 @@
 ---
 title: u-boot 学习笔记
-date: 2025-10-03 09:44:27
-top: 99 # 数字越大越靠前！
+top: 99
 categories:
   - uboot
 tags:
   - uboot
+abbrlink: 329f510
+date: 2025-10-03 09:44:27
 ---
 # u-boot 学习笔记
 

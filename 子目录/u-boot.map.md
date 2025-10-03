@@ -1,12 +1,13 @@
 ---
 title: u-boot
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - 子目录
 tags:
   - uboot
   - 子目录
+abbrlink: b4d5a7bc
+date: 2025-10-03 09:44:27
 ---
 [TOC]
 

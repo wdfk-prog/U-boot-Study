@@ -1,12 +1,13 @@
 ---
 title: ubantu st-link 调试
-date: 2025-10-03 10:58:55
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: a9a5a729
+date: 2025-10-03 10:58:55
 ---
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/f30d799e42a24aa4b52ba15cb20ba689.png)

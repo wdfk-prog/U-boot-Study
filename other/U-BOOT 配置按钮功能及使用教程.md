@@ -1,12 +1,13 @@
 ---
 title: U-BOOT 配置按钮功能及使用教程
-date: 2025-10-03 10:58:18
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: ab5465d3
+date: 2025-10-03 10:58:18
 ---
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/20a09257e30245398974539fb3e88b6f.png)

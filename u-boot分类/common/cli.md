@@ -1,6 +1,5 @@
 ---
 title: cli
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -9,6 +8,8 @@ tags:
   - uboot
   - u-boot分类
   - common
+abbrlink: 48f6513c
+date: 2025-10-03 09:44:27
 ---
 # CTL_CH 转换为控制字符
 ```c

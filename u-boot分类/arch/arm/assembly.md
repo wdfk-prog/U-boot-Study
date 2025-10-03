@@ -1,6 +1,5 @@
 ---
 title: assembly
-date: 2025-10-03 09:44:27
 categories:
   - uboot
   - u-boot分类
@@ -11,6 +10,8 @@ tags:
   - u-boot分类
   - arch
   - arm
+abbrlink: 1a09ef0b
+date: 2025-10-03 09:44:27
 ---
 [TOC]
 

@@ -1,12 +1,13 @@
 ---
 title: '[uboot][stm32]配置LTDC屏幕'
-date: 2025-10-03 10:54:10
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: 3a034560
+date: 2025-10-03 10:54:10
 ---
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/2eecbf13625f4a8c9345a5a7a785a9eb.png)

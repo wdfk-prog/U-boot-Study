@@ -1,12 +1,13 @@
 ---
 title: 向u-boot提交补丁的流程
-date: 2025-10-03 10:58:55
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: 1d2396de
+date: 2025-10-03 10:58:55
 ---
 
 @[toc]

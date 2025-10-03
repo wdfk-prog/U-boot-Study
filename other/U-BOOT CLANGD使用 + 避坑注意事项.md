@@ -1,12 +1,13 @@
 ---
 title: U-BOOT CLANGD使用 + 避坑注意事项
-date: 2025-10-03 11:00:19
 categories:
   - uboot
   - other
 tags:
   - uboot
   - other
+abbrlink: d5eacab8
+date: 2025-10-03 11:00:19
 ---
 
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/0ecdaa8b351f4ad0a119c5b2bf904483.png)
