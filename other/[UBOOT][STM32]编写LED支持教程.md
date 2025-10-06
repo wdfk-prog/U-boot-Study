@@ -9,6 +9,8 @@ tags:
 abbrlink: 18312ec5
 date: 2025-10-03 10:58:03
 ---
+<meta name="referrer" content="no-referrer" />
+
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/d77ded5a221c4fe4b4a2f79d7e078d47.png)
 

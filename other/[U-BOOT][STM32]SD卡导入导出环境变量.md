@@ -9,6 +9,8 @@ tags:
 abbrlink: 60e6672f
 date: 2025-10-03 10:57:24
 ---
+<meta name="referrer" content="no-referrer" />
+
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/463f491c61da4078bfa19e2da2302bce.png)
 

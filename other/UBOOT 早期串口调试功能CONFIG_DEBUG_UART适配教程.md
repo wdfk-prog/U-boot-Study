@@ -9,6 +9,8 @@ tags:
 abbrlink: fb266f7b
 date: 2025-10-03 10:58:37
 ---
+<meta name="referrer" content="no-referrer" />
+
 @[toc]
 
 >https://github.com/wdfk-prog/u-boot/tree/art-pi-debug

@@ -9,6 +9,8 @@ tags:
 abbrlink: 933f970e
 date: 2025-10-03 10:56:17
 ---
+<meta name="referrer" content="no-referrer" />
+
 @[toc]
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/direct/9930b1592746424484928bf47a510966.png)
 
