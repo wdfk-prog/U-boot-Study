@@ -1,4 +1,13 @@
-﻿# uboot学习笔记系列
+---
+title: uboot学习笔记系列
+categories:
+  - uboot
+tags:
+  - uboot
+abbrlink: fbd3aa04
+date: 2026-07-31 15:11:36
+---
+# uboot学习笔记系列
 
 - 1. [other](<./other/>)
   - [1.1. \[U-BOOT\]\[STM32\]SD卡导入导出环境变量](<./other/%5BU-BOOT%5D%5BSTM32%5DSD%E5%8D%A1%E5%AF%BC%E5%85%A5%E5%AF%BC%E5%87%BA%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F.md>) ([个人博客链接](https://wdfk-prog.space/posts/60e6672f/)) ([CSDN链接](https://wdfk-prog.blog.csdn.net/article/details/145815259))
